@@ -17,6 +17,7 @@ from diffusion_policy_3d.model.diffusion.mask_generator import LowdimMaskGenerat
 from diffusion_policy_3d.common.pytorch_util import dict_apply
 from diffusion_policy_3d.common.model_util import print_params
 from diffusion_policy_3d.model.vision.pointnet_extractor import DP3Encoder
+from diffusion_policy_3d.model.vision.my_encoder import UltrasoundDPEncoder
 
 class UltrasoundDP(BasePolicy):
     def __init__(self, 
@@ -35,11 +36,8 @@ class UltrasoundDP(BasePolicy):
             use_down_condition=True,
             use_mid_condition=True,
             use_up_condition=True,
-            encoder_output_dim=256,
-            crop_shape=None,
-            use_pc_color=False,
-            pointnet_type="pointnet",
-            pointcloud_encoder_cfg=None,
+            encoder_output_dim=256, # origin: 256
+            ultrasound_encoder_cfg=None,
             # parameters passed to step
             **kwargs):
         super().__init__()
@@ -59,14 +57,11 @@ class UltrasoundDP(BasePolicy):
         obs_shape_meta = shape_meta['obs']
         obs_dict = dict_apply(obs_shape_meta, lambda x: x['shape'])
 
-        # my TODO : to modify?
-        obs_encoder = DP3Encoder(observation_space=obs_dict,
-                                                   img_crop_shape=crop_shape,
-                                                out_channel=encoder_output_dim,
-                                                pointcloud_encoder_cfg=pointcloud_encoder_cfg,
-                                                use_pc_color=use_pc_color,
-                                                pointnet_type=pointnet_type,
-                                                )
+        obs_encoder = UltrasoundDPEncoder(  
+                                            observation_space=obs_dict,
+                                            out_channel=encoder_output_dim,
+                                            ultrasound_encoder_cfg = ultrasound_encoder_cfg,
+                                        )
 
         # create diffusion model
         obs_feature_dim = obs_encoder.output_shape()
@@ -80,10 +75,10 @@ class UltrasoundDP(BasePolicy):
                 global_cond_dim = obs_feature_dim * n_obs_steps
         
 
-        self.use_pc_color = use_pc_color
-        self.pointnet_type = pointnet_type
-        cprint(f"[SDP3] use_pc_color: {self.use_pc_color}", "yellow")
-        cprint(f"[SDP3] pointnet_type: {self.pointnet_type}", "yellow")
+        # self.use_pc_color = use_pc_color
+        # self.pointnet_type = pointnet_type
+        # cprint(f"[SDP3] use_pc_color: {self.use_pc_color}", "yellow")
+        # cprint(f"[SDP3] pointnet_type: {self.pointnet_type}", "yellow")
 
 
         model = ConditionalUnet1D(
@@ -181,9 +176,9 @@ class UltrasoundDP(BasePolicy):
         # normalize input
         nobs = self.normalizer.normalize(obs_dict)
         # this_n_point_cloud = nobs['imagin_robot'][..., :3] # only use coordinate
-        if not self.use_pc_color:
-            nobs['point_cloud'] = nobs['point_cloud'][..., :3]
-        this_n_point_cloud = nobs['point_cloud']
+        # if not self.use_pc_color:
+        #     nobs['point_cloud'] = nobs['point_cloud'][..., :3]
+        # this_n_point_cloud = nobs['point_cloud']
         
         
         value = next(iter(nobs.values()))
@@ -260,8 +255,8 @@ class UltrasoundDP(BasePolicy):
         nobs = self.normalizer.normalize(batch['obs'])
         nactions = self.normalizer['action'].normalize(batch['action'])
 
-        if not self.use_pc_color:
-            nobs['point_cloud'] = nobs['point_cloud'][..., :3]
+        # if not self.use_pc_color:
+        #     nobs['point_cloud'] = nobs['point_cloud'][..., :3]
         
         
         batch_size = nactions.shape[0]

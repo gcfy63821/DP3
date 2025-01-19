@@ -9,14 +9,14 @@ shape_meta: &shape_meta
     image:
         shape: *image_shape
         type: rgb
-    # point_cloud:
-    #   shape: [512, 3]
-    #   type: point_cloud
-    agent_pos:
-      shape: [24]
+    ee_pos:
+      shape: [6]
+      type: low_dim
+    force:
+      shape: [12]
       type: low_dim
   action:
-    shape: [26]
+    shape: [6]
 
 env_runner:
   _target_: diffusion_policy_3d.env_runner.ultrasound_runner.UltrasoundRunner
