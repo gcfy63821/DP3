@@ -8,11 +8,16 @@ from diffusion_policy_3d.common.pytorch_util import dict_apply
 import diffusion_policy_3d.common.logger_util as logger_util
 from termcolor import cprint
 
-class CustomRunner:
+class UltrasoundRunner:
     def __init__(self,
                  output_dir,
                  eval_episodes=20,
                  max_steps=1000,
+                 n_obs_steps=8,
+                 n_action_steps=8,
+                 fps=20,
+                 task_name = None,
+                 render_size = 84,
                  tqdm_interval_sec=5.0,
                  device="cuda:0"
                  ):
