@@ -15,31 +15,31 @@ eval_data_path = '/home/robotics/crq/3D-Diffusion-Policy/3D-Diffusion-Policy/dat
 class UltrasoundRunner(BaseRunner):
     def __init__(self,
                  output_dir,
-                 eval_episodes=20,
                  data_path=eval_data_path,  # 数据集路径
-                 batch_size=32,  # 每批次的数据量
-                 tqdm_interval_sec=5.0,
+                 batch_size=100,  # 每批次的数据量
                  device="cuda:0"):
         super().__init__(output_dir)
         
-        self.eval_episodes = eval_episodes
         self.data_path = data_path  # 从数据集读取
         self.batch_size = batch_size
         self.device = device
-        self.tqdm_interval_sec = tqdm_interval_sec
         
         # 日志记录器
         self.logger_util_test = logger_util.LargestKRecorder(K=3)
         self.logger_util_test10 = logger_util.LargestKRecorder(K=5)
         
-        # 加载数据集
-        self.zarr_data = zarr.open(self.data_path, mode='r')  # 打开zarr文件
+        # Load the Zarr data
+        self.zarr_data = zarr.open(self.data_path, mode='r')['data']
+        self.zarr_meta = zarr.open(self.data_path, mode='r')['meta']
         
-        self.img_data = self.zarr_data['data/img']
-        self.state_data = self.zarr_data['data/state']
-        self.action_data = self.zarr_data['data/action']
-        self.timestamp_data = self.zarr_data['data/timestamp']
-        self.episode_ends_data = self.zarr_data['data/episode_ends']
+        # Prepare the data (images, actions, states, etc.)
+        self.img_data = self.zarr_data['img']
+        self.action_data = self.zarr_data['action']
+        self.state_data = self.zarr_data['state']
+        self.force_data = self.zarr_data['force']
+        self.timestamp_data = self.zarr_data['timestamp']
+        self.episode_ends = self.zarr_meta['episode_ends']
+        self.eval_episodes = len(self.episode_ends)
         
     def run(self, policy: BasePolicy, save_video=False):
         """
@@ -54,40 +54,42 @@ class UltrasoundRunner(BaseRunner):
         all_traj_rewards = []
         all_success_rates = []
 
-        # 总评估回合
-        for episode_idx in tqdm.tqdm(range(self.eval_episodes), 
-                                      desc="Eval from Dataset", 
-                                      leave=False, mininterval=self.tqdm_interval_sec):
-            # 获取当前回合的索引
-            start_idx = episode_idx * self.batch_size
-            end_idx = min(start_idx + self.batch_size, len(self.img_data))
-
-            # 初始化回合数据
+        for episode_idx in tqdm.tqdm(range(self.eval_episodes), desc="Evaluating"):
+            # Load the data for one episode
+            episode_start = self.episode_ends[episode_idx]
+            episode_end = self.episode_ends[episode_idx + 1] if episode_idx + 1 < len(self.episode_ends) else len(self.img_data)
+            
+            images = self.img_data[episode_start:episode_end]
+            actions = self.action_data[episode_start:episode_end]
+            states = self.state_data[episode_start:episode_end]
+            forces = self.force_data[episode_start:episode_end]
+            timestamps = self.timestamp_data[episode_start:episode_end]
+            
             traj_reward = 0
             is_success = False
             done = False
 
-            # 在数据集上执行评估
-            for idx in range(start_idx, end_idx):
-                # 从数据集中加载数据
-                img = torch.from_numpy(self.img_data[idx]).to(device=device, dtype=dtype)
-                state = torch.from_numpy(self.state_data[idx]).to(device=device, dtype=dtype)
-                action = torch.from_numpy(self.action_data[idx]).to(device=device, dtype=dtype)
-                timestamp = torch.from_numpy(self.timestamp_data[idx]).to(device=device, dtype=dtype)
-                episode_end = self.episode_ends_data[idx]
+            for t in range(len(images)):
+                img = torch.from_numpy(images[t]).to(device)  # 将图像移动到 GPU
+                state = torch.from_numpy(states[t]).to(device)  # 将状态移动到 GPU
+                force = torch.from_numpy(forces[t]).to(device)  # 将力的张量移动到 GPU
+                action = torch.from_numpy(actions[t]).to(device)  # 将动作张量移动到 GPU（如果需要）
 
-                # 输入数据准备
-                obs_dict_input = {}
-                obs_dict_input['img'] = img.unsqueeze(0)  # 加上批次维度
-                obs_dict_input['state'] = state.unsqueeze(0)
-
-                # 使用模型预测动作
+                
+                
+                # Preprocess the image
+                # img_input = self.preprocess_input(img)
+                
+                # Prepare the full state information (image + force + state)
                 with torch.no_grad():
-                    action_dict = policy.predict_action(obs_dict_input)
+                    obs_dict_input = {'img': img.unsqueeze(0), 'state': state.unsqueeze(0), 'force':force.unsqueeze(0)}
+                    action_dict = policy.predict_action(obs_dict_input) # to predict
 
                 np_action_dict = dict_apply(action_dict,
                                             lambda x: x.detach().to('cpu').numpy())
-                predicted_action = np_action_dict['action'].squeeze(0)
+
+                # action = np_action_dict['action'].squeeze(0)
+                predicted_action = np_action_dict['action_pred'].squeeze(0)
 
                 # 计算奖励和结束条件
                 reward = self.calculate_reward(predicted_action, action)  # 你可以定义一个奖励计算函数

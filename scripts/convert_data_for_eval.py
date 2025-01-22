@@ -22,7 +22,6 @@ def preproces_image(image):
 # 输入路径（包含.npy文件）
 expert_data_path = '/home/robotics/crq/3D-Diffusion-Policy/3D-Diffusion-Policy/data/record_data/20250120'
 save_data_path = '/home/robotics/crq/3D-Diffusion-Policy/3D-Diffusion-Policy/data/eval_data.zarr'
-# N = 5  # 每隔 N 个文件选择 1 个文件，设置为你需要的间隔值
 
 # 获取目录下所有子文件夹
 subfolders = [os.path.join(expert_data_path, f) for f in os.listdir(expert_data_path) if os.path.isdir(os.path.join(expert_data_path, f))]
@@ -61,8 +60,13 @@ for subfolder in subfolders:
     
     current_count = 0
     start_index = len(state_arrays)
+    t = 0
     for k, npy_file in enumerate(npy_files):
         # k += random.randint(0, 9)
+        if k >= t:
+            t += random.randint(0,9)
+        else:
+            continue
         
         total_count += 1
         current_count += 1

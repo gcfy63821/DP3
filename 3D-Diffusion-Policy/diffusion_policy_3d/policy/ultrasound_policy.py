@@ -166,7 +166,26 @@ class UltrasoundDP(BasePolicy):
 
 
         return trajectory
-
+    
+    def gaussian_normalize_dict(self, data: Dict[str, torch.Tensor]) -> Dict[str, torch.Tensor]:
+        
+        normalized_data = {}
+        
+        for key, value in data.items():
+            if isinstance(value, torch.Tensor):
+                # 确保输入数据为浮动类型
+                value = value.float()  # 转换为 float 类型
+                
+                # 计算均值和标准差
+                data_mean = value.mean()
+                data_std = value.std()
+                
+                # 高斯标准化
+                normalized_data[key] = (value - data_mean) / data_std
+            else:
+                raise ValueError(f"Value for key '{key}' is not a tensor. Expected a torch.Tensor.")
+        
+        return normalized_data
 
     def predict_action(self, obs_dict: Dict[str, torch.Tensor]) -> Dict[str, torch.Tensor]:
         """
@@ -174,7 +193,10 @@ class UltrasoundDP(BasePolicy):
         result: must include "action" key
         """
         # normalize input
-        nobs = self.normalizer.normalize(obs_dict)
+        # self.normalizer.fit(obs_dict, mode='gaussian', last_n_dims=2)  # 或者 mode='gaussian'，如果数据是高斯分布的
+
+        # nobs = self.normalizer.normalize(obs_dict)
+        nobs = self.gaussian_normalize_dict(obs_dict)
         # this_n_point_cloud = nobs['imagin_robot'][..., :3] # only use coordinate
         # if not self.use_pc_color:
         #     nobs['point_cloud'] = nobs['point_cloud'][..., :3]
@@ -197,7 +219,9 @@ class UltrasoundDP(BasePolicy):
         global_cond = None
         if self.obs_as_global_cond:
             # condition through global feature
-            this_nobs = dict_apply(nobs, lambda x: x[:,:To,...].reshape(-1,*x.shape[2:]))
+            # this_nobs = dict_apply(nobs, lambda x: x[:,:To,...].reshape(-1,*x.shape[2:])) # don't know
+            this_nobs = nobs
+            # print(this_nobs['img'].shape)
             nobs_features = self.obs_encoder(this_nobs)
             if "cross_attention" in self.condition_type:
                 # treat as a sequence
