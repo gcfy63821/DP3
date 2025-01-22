@@ -60,7 +60,7 @@ policy:
   ultrasound_encoder_cfg:
     out_channels: ${policy.encoder_output_dim}
     force_input_dim: 12  # force sensor dimension
-    ee_input_dim: 6
+    ee_input_dim: 14
     resnet_output_dim: 128  # ResNet feature output dimension
     pretrained: True  # Whether to use pretrained weights for ResNet
     debug: False
