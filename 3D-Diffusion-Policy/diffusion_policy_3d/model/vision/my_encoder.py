@@ -160,11 +160,11 @@ class UltrasoundDPEncoder(nn.Module):
         self.n_output_channels = out_channel
         self.resnet_output_dim = ultrasound_encoder_cfg.resnet_output_dim
         self.force_input_dim = observation_space['force']
-        self.ee_input_dim = observation_space['ee_pos']
+        self.ee_input_dim = observation_space['state']
         print(self.force_input_dim, self.ee_input_dim)
 
         block_channel = [64, 128, 256]
-
+        self.debug = debug
        
         
         # ResNet-34 for Image Encoding
@@ -224,7 +224,8 @@ class UltrasoundDPEncoder(nn.Module):
 
     def forward(self, observations: Dict[str, torch.Tensor]) -> torch.Tensor:
 
-        img = observations['image']  # Shape: [B, C, H, W]        
+        img = observations['img']  # Shape: [B, C, H, W]   
+        # print('imgshape:',img.shape)     
         img_features = self.cnn(img)  # Shape: [B, 512, 1, 1]
         img_features = img_features.view(img_features.size(0), -1)  # Shape: [B, 512]
         img_features = self.cnn_fc(img_features)  # Shape: [B, resnet_output_dim]
@@ -232,7 +233,7 @@ class UltrasoundDPEncoder(nn.Module):
         force = observations['force']  # Shape: [B, 6]
         force_features = self.force_mlp(force)  # Shape: [B, resnet_output_dim]
 
-        joint = observations['ee_pos']  # Shape: [B, N]
+        joint = observations['state']  # Shape: [B, N]
         joint_features = self.joint_mlp(joint)  # Shape: [B, resnet_output_dim]
 
         # Concatenate and Process

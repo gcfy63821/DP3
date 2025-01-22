@@ -100,8 +100,11 @@ zarr_meta = zarr_root.create_group('meta')
 
 # 将数据堆叠到数组中
 img_arrays = np.stack(img_arrays, axis=0)
-if img_arrays.shape[1] == 3:  # make channel last
-    img_arrays = np.transpose(img_arrays, (0, 2, 3, 1))
+# if img_arrays.shape[1] == 3:  # make channel last
+#     img_arrays = np.transpose(img_arrays, (0, 2, 3, 1))
+# 假设 img 是形状为 [256, 84, 84, 3] 的张量
+img_arrays = np.transpose(img_arrays, (0, 3, 1, 2))
+
 action_arrays = np.stack(action_arrays, axis=0)
 state_arrays = np.stack(state_arrays, axis=0)
 force_arrays = np.stack(force_arrays, axis=0)

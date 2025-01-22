@@ -60,8 +60,9 @@ class UltrasoundDataset(BaseDataset):
     def get_normalizer(self, mode='limits', **kwargs):
         data = {
             'action': self.replay_buffer['action'],
-            'agent_pos': self.replay_buffer['state'][...,:],
+            'state': self.replay_buffer['state'][...,:],
             'force': self.replay_buffer['force'],
+            'img': self.replay_buffer['img'],
         }
         normalizer = LinearNormalizer()
         normalizer.fit(data=data, last_n_dims=1, mode=mode, **kwargs)
@@ -72,7 +73,7 @@ class UltrasoundDataset(BaseDataset):
         return len(self.sampler)
 
     def _sample_to_data(self, sample):
-        agent_pos = sample['state'][:,].astype(np.float32) # (agent_posx2, block_posex3)
+        state = sample['state'][:,].astype(np.float32) # (agent_posx2, block_posex3)
         image = sample['img'][:,].astype(np.float32)
         force = sample['force'][:,].astype(np.float32)
 
@@ -80,7 +81,7 @@ class UltrasoundDataset(BaseDataset):
             'obs': {
                 # 'point_cloud': point_cloud, # T, 1024, 6
                 'img': image,
-                'agent_pos': agent_pos, # T, D_pos
+                'state': state, # T, D_pos
                 'force': force,
             },
             'action': sample['action'].astype(np.float32) # T, D_action
