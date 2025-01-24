@@ -44,3 +44,21 @@ eval.py中写了如何调用训练好的模型(train.py line 346)，虽然现在
       <origin xyz="${x} ${y} ${z+0.02}" rpy="${r} ${p} ${y+0.7854}" />
     </joint>
     ```
+
+**0124**
+
+roslaunch franka_visualization franka_visualization.launch
+
+roslaunch netft_rdt_driver ft_sensor.launch
+roslaunch force_torque_sensor_calib pub_imu.launch
+roslaunch gravity_compensation gravity_compensation.launch
+
+
+    source ~/.bashrc
+
+    conda activate dp3
+
+    bash scripts/run.sh ultrasound_dp ultrasound_scan 0124 0 0
+
+
+    倒是跑起来了

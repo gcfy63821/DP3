@@ -1,3 +1,12 @@
+if __name__ == "__main__":
+    import sys
+    import os
+    import pathlib
+
+    ROOT_DIR = str(pathlib.Path(__file__).parent.parent.parent)
+    sys.path.append(ROOT_DIR)
+    os.chdir(ROOT_DIR)
+
 import rospy
 import torch
 import cv2
@@ -14,10 +23,13 @@ from sensor_msgs.msg import JointState
 from geometry_msgs.msg import WrenchStamped
 from std_msgs.msg import Float32MultiArray
 from cv_bridge import CvBridge
-from diffusion_policy_3d.policy.ultrasound_dp import UltrasoundDP
+from diffusion_policy_3d.policy.ultrasound_policy import UltrasoundDP
 from diffusion_policy_3d.policy.dp3 import DP3
 from geometry_msgs.msg import TransformStamped
 import tf2_ros
+
+OmegaConf.register_new_resolver("eval", eval, replace=True)
+ 
 
 def get_tf_mat(i, dh):
     """Calculate the transformation matrix for the given joint based on DH parameters."""
@@ -101,6 +113,7 @@ class PolicyROSRunner:
     def __init__(self, cfg: OmegaConf, output_dir=None):
         self.cfg = copy.deepcopy(cfg)
         self.device = torch.device(self.cfg.training.device)
+        self.output_dir = '3D-Diffusion-Policy/data/outputs/ultrasound_scan-ultrasound_dp-0120_seed0'
 
         # 初始化 ROS 节点
         rospy.init_node('ultrasound_policy_runner', anonymous=True)
@@ -153,6 +166,7 @@ class PolicyROSRunner:
         rospy.Subscriber("/ft_sensor/ft_compensated", WrenchStamped, self.ft_comp_callback)
         rospy.Subscriber("/ft_sensor/netft_data", WrenchStamped, self.netft_callback)
         rospy.Subscriber("/joint_states", JointState, self.agent_pos_callback)
+        print('Subscribed Topics')
 
     def get_closest_data(self, data_list, timestamp):
         # 获取与当前时间戳最接近的数据
@@ -173,13 +187,14 @@ class PolicyROSRunner:
         image = torch.from_numpy(image).cuda()
         image = image.permute(2, 0, 1) # HxWx4 -> 4xHxW
         image = torchvision.transforms.functional.resize(image, (img_size, img_size))
-        image = image.permute(1, 2, 0) # 4xHxW -> HxWx4
+        # image = image.permute(1, 2, 0) # 4xHxW -> HxWx4
         image = image.cpu().numpy()
         return image
 
     def run(self):
         # 处理输入并运行 policy
-        rate = rospy.Rate(30)  # 10Hz
+        # rate = rospy.Rate(30)  # 10Hz
+        print('start running')
         
         while not rospy.is_shutdown():
             ret, frame = self.cap.read()
@@ -229,7 +244,7 @@ class PolicyROSRunner:
                     self.publish_tf(action_output, frame_id="base_link", child_id="action_frame")
 
 
-            rate.sleep()
+            # rate.sleep()
             key = cv2.waitKey(1)
             if key == ord('q'):
                 break
@@ -322,14 +337,25 @@ class PolicyROSRunner:
         t.child_frame_id = child_id
 
         # 假设 action 数据是 [x, y, z, qx, qy, qz, qw]
-        t.transform.translation.x = action[0]
-        t.transform.translation.y = action[1]
-        t.transform.translation.z = action[2]
-        t.transform.rotation.x = action[3]
-        t.transform.rotation.y = action[4]
-        t.transform.rotation.z = action[5]
-        t.transform.rotation.w = action[6]
+        t.transform.translation.x = action[7]
+        t.transform.translation.y = action[8]
+        t.transform.translation.z = action[9]
+        t.transform.rotation.x = action[10]
+        t.transform.rotation.y = action[11]
+        t.transform.rotation.z = action[12]
+        t.transform.rotation.w = action[13]
 
         br.sendTransform(t)
 
 
+@hydra.main(
+    version_base=None,
+    config_path=str(pathlib.Path(__file__).parent.joinpath(
+        'diffusion_policy_3d', 'config'))
+)
+def main(cfg):
+    runner = PolicyROSRunner(cfg)
+    runner.run()
+
+if __name__ == "__main__":
+    main()
