@@ -29,3 +29,18 @@ input参考ultrasound_scan.cfg中的obs, state 格式 = action
 checkpoint:
 3D-Diffusion-Policy/data/outputs/ultrasound_scan-ultrasound_dp-0120_seed0/checkpoints/latest.ckpt
 eval.py中写了如何调用训练好的模型(train.py line 346)，虽然现在输入数据还没有对齐。
+
+**0123**
+* 完成hybrid force-impedance controller：
+    - Usage: `roslaunch franka_us_controllers my_ipd_force_controller.launch`
+    - 接收期望位置的topic:`equilibrium_pose`，接收期望力的topic:`desired_wrench`
+    - 写的时候做了一个近似：假设在`panda_ft_frame`处的受力等于在`panda_link8`处了，两者的位置有一点不同，我使用的雅可比矩阵是法兰处的`getZeroJacobian(franka::Frame::kFlange)`。
+        ![alt text](<Screenshot from 2025-01-24 11-49-35.png>)
+    在urdf中区别如下：
+    ```    
+    <joint name="${arm_id}_ft_frame_joint" type="fixed">
+      <parent link="${connected_to}" />
+      <child link="${arm_id}_ft_frame" />
+      <origin xyz="${x} ${y} ${z+0.02}" rpy="${r} ${p} ${y+0.7854}" />
+    </joint>
+    ```
