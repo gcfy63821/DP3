@@ -33,7 +33,7 @@ eval.py中写了如何调用训练好的模型(train.py line 346)，虽然现在
 **0123**
 * 完成hybrid force-impedance controller：
     - Usage: `roslaunch franka_us_controllers my_ipd_force_controller.launch`
-    - 接收期望位置的topic:`equilibrium_pose`，接收期望力的topic:`desired_wrench`
+    - 接收期望位置的topic:`desired_pose`，接收期望力的topic:`desired_wrench`
     - 写的时候做了一个近似：假设在`panda_ft_frame`处的受力等于在`panda_link8`处了，两者的位置有一点不同，我使用的雅可比矩阵是法兰处的`getZeroJacobian(franka::Frame::kFlange)`。
         ![alt text](<Screenshot from 2025-01-24 11-49-35.png>)
     在urdf中区别如下：
@@ -54,11 +54,15 @@ roslaunch force_torque_sensor_calib pub_imu.launch
 roslaunch gravity_compensation gravity_compensation.launch
 
 
-    source ~/.bashrc
+source ~/.bashrc
 
-    conda activate dp3
+conda activate dp3
 
-    bash scripts/run.sh ultrasound_dp ultrasound_scan 0124 0 0
+bash scripts/run.sh ultrasound_dp ultrasound_scan 0124 0 0
 
 
-    倒是跑起来了
+倒是跑起来了
+
+**0125**
+normalizer里面action的normalize
+obs的维数

@@ -60,7 +60,7 @@ class TrainDP3Workspace:
                 self.ema_model = copy.deepcopy(self.model)
             except: # minkowski engine could not be copied. recreate it
                 self.ema_model = hydra.utils.instantiate(cfg.policy)
-
+    
 
         # configure training state
         self.optimizer = hydra.utils.instantiate(

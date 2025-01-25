@@ -18,7 +18,7 @@ class ConditionalResidualBlock1D(nn.Module):
     def __init__(self,
                  in_channels,
                  out_channels,
-                 cond_dim,
+                 cond_dim, # 256
                  kernel_size=3,
                  n_groups=8,
                  condition_type='film'):
@@ -79,6 +79,8 @@ class ConditionalResidualBlock1D(nn.Module):
             out : [ batch_size x out_channels x horizon ]
         '''
         out = self.blocks[0](x)  
+        # print(f'out: {out.shape}')
+        # print(f'cond: {cond.shape}') # out: torch.Size([1, 128, 4]) cond: torch.Size([1, 192])
         if cond is not None:      
             if self.condition_type == 'film':
                 embed = self.cond_encoder(cond)
@@ -136,6 +138,13 @@ class ConditionalUnet1D(nn.Module):
         cond_dim = dsed
         if global_cond_dim is not None:
             cond_dim += global_cond_dim
+
+        # cprint(f'in ConditionalUnet1D', 'yellow')
+
+        # cprint(f'input_dim: {input_dim}', 'blue')
+        # cprint(f'diffusion_step_embed_dim: {diffusion_step_embed_dim}', 'blue')
+        # cprint(f'global_cond_dim: {global_cond_dim}', 'blue')
+        # cprint(f'cond_dim: {cond_dim}', 'blue')
 
         in_out = list(zip(all_dims[:-1], all_dims[1:]))
 
@@ -229,20 +238,45 @@ class ConditionalUnet1D(nn.Module):
         """
         sample = einops.rearrange(sample, 'b h t -> b t h')
 
+        # # 1. time
+        # timesteps = timestep
+        # if not torch.is_tensor(timesteps):
+        #     # TODO: this requires sync between CPU and GPU. So try to pass timesteps as tensors if you can
+        #     timesteps = torch.tensor([timesteps], dtype=torch.long, device=sample.device)
+        # elif torch.is_tensor(timesteps) and len(timesteps.shape) == 0:
+        #     timesteps = timesteps[None].to(sample.device)
+        # # broadcast to batch dimension in a way that's compatible with ONNX/Core ML
+        # timesteps = timesteps.expand(sample.shape[0])
+
+        # timestep_embed = self.diffusion_step_encoder(timesteps)
+        # if global_cond is not None:
+        #     global_feature = torch.cat([timestep_embed, global_cond], axis=-1)
+        
+
+        # # encode local features
+        # h_local = list()
+        # if local_cond is not None:
+        #     local_cond = einops.rearrange(local_cond, 'b h t -> b t h')
+        #     resnet, resnet2 = self.local_cond_encoder
+        #     x = resnet(local_cond, global_feature)
+        #     h_local.append(x)
+        #     x = resnet2(local_cond, global_feature)
+        #     h_local.append(x)
+
+
         # 1. time
         timesteps = timestep
         if not torch.is_tensor(timesteps):
-            # TODO: this requires sync between CPU and GPU. So try to pass timesteps as tensors if you can
             timesteps = torch.tensor([timesteps], dtype=torch.long, device=sample.device)
         elif torch.is_tensor(timesteps) and len(timesteps.shape) == 0:
             timesteps = timesteps[None].to(sample.device)
-        # broadcast to batch dimension in a way that's compatible with ONNX/Core ML
-        timesteps = timesteps.expand(sample.shape[0])
+        
+        timesteps = timesteps.expand(sample.shape[0])  # Broadcast timesteps to batch dimension
 
         timestep_embed = self.diffusion_step_encoder(timesteps)
+
         if global_cond is not None:
             global_feature = torch.cat([timestep_embed, global_cond], axis=-1)
-
 
         # encode local features
         h_local = list()
@@ -256,6 +290,7 @@ class ConditionalUnet1D(nn.Module):
         
         x = sample
         h = []
+        # print(f'global_feature: {global_feature.shape}') # global_feature: torch.Size([1, 192])
         for idx, (resnet, downsample) in enumerate(self.down_modules):
             if self.use_down_condition:
                 x = resnet(x, global_feature)

@@ -18,6 +18,8 @@ from diffusion_policy_3d.common.pytorch_util import dict_apply
 from diffusion_policy_3d.common.model_util import print_params
 from diffusion_policy_3d.model.vision.pointnet_extractor import DP3Encoder
 from diffusion_policy_3d.model.vision.my_encoder import UltrasoundDPEncoder
+from diffusion_policy_3d.dataset.base_dataset import BaseDataset
+from torch.utils.data import DataLoader
 
 class UltrasoundDP(BasePolicy):
     def __init__(self, 
@@ -72,18 +74,18 @@ class UltrasoundDP(BasePolicy):
             if "cross_attention" in self.condition_type:
                 global_cond_dim = obs_feature_dim
             else:
-                global_cond_dim = obs_feature_dim * n_obs_steps
+                global_cond_dim = obs_feature_dim * n_obs_steps # here is the problem
         
 
         # self.use_pc_color = use_pc_color
         # self.pointnet_type = pointnet_type
         # cprint(f"[SDP3] use_pc_color: {self.use_pc_color}", "yellow")
         # cprint(f"[SDP3] pointnet_type: {self.pointnet_type}", "yellow")
-
+        # cprint(f'global_cond_dim: {global_cond_dim}', 'green') # 128
 
         model = ConditionalUnet1D(
             input_dim=input_dim,
-            local_cond_dim=None,
+            local_cond_dim=None, # None
             global_cond_dim=global_cond_dim,
             diffusion_step_embed_dim=diffusion_step_embed_dim,
             down_dims=down_dims,
@@ -94,6 +96,7 @@ class UltrasoundDP(BasePolicy):
             use_mid_condition=use_mid_condition,
             use_up_condition=use_up_condition,
         )
+        # cprint(f'model: {model}', 'green')
 
         self.obs_encoder = obs_encoder
         self.model = model
@@ -142,6 +145,8 @@ class UltrasoundDP(BasePolicy):
             size=condition_data.shape, 
             dtype=condition_data.dtype,
             device=condition_data.device)
+        
+        # print(f'condition_data.shape: {condition_data.shape}') # torch.Size([1, 4, 14])
 
         # set step values
         scheduler.set_timesteps(self.num_inference_steps)
@@ -150,6 +155,13 @@ class UltrasoundDP(BasePolicy):
         for t in scheduler.timesteps:
             # 1. apply conditioning
             trajectory[condition_mask] = condition_data[condition_mask]
+            # # DEBUG OUTPUT
+            # cprint(f'in UltrasoundDP', 'yellow')
+            # cprint(f'trajectory: {trajectory.shape}', 'green')
+            # cprint(f'sample: {trajectory.shape}', 'green')
+            # cprint(f'local_cond: {local_cond}', 'green')
+            # cprint(f'global_cond shape: {global_cond.shape}', 'green')
+
 
 
             model_output = model(sample=trajectory,
@@ -195,8 +207,8 @@ class UltrasoundDP(BasePolicy):
         # normalize input
         # self.normalizer.fit(obs_dict, mode='gaussian', last_n_dims=2)  # 或者 mode='gaussian'，如果数据是高斯分布的
 
-        # nobs = self.normalizer.normalize(obs_dict)
-        nobs = self.gaussian_normalize_dict(obs_dict)
+        nobs = self.normalizer.normalize(obs_dict)
+        # nobs = self.gaussian_normalize_dict(obs_dict)
         # this_n_point_cloud = nobs['imagin_robot'][..., :3] # only use coordinate
         # if not self.use_pc_color:
         #     nobs['point_cloud'] = nobs['point_cloud'][..., :3]
@@ -242,7 +254,6 @@ class UltrasoundDP(BasePolicy):
             cond_mask = torch.zeros_like(cond_data, dtype=torch.bool)
             cond_data[:,:To,Da:] = nobs_features
             cond_mask[:,:To,Da:] = True
-
         # run sampling
         nsample = self.conditional_sample(
             cond_data, 

@@ -24,9 +24,13 @@ from geometry_msgs.msg import WrenchStamped
 from std_msgs.msg import Float32MultiArray
 from cv_bridge import CvBridge
 from diffusion_policy_3d.policy.ultrasound_policy import UltrasoundDP
+from diffusion_policy_3d.dataset.base_dataset import BaseDataset
+from diffusion_policy_3d.dataset.ultrasound_dataset import UltrasoundDataset
 from diffusion_policy_3d.policy.dp3 import DP3
 from geometry_msgs.msg import TransformStamped
 import tf2_ros
+from collections import deque
+from torch.utils.data import DataLoader
 
 OmegaConf.register_new_resolver("eval", eval, replace=True)
  
@@ -118,7 +122,12 @@ class PolicyROSRunner:
         # 初始化 ROS 节点
         rospy.init_node('ultrasound_policy_runner', anonymous=True)
 
+        self.n_obs_steps = self.cfg.policy.n_obs_steps
+        self.history = deque(maxlen=self.n_obs_steps)
+
         
+
+
         self.model: DP3 = hydra.utils.instantiate(self.cfg.policy)
         self.ema_model: DP3 = None
         if self.cfg.training.use_ema:
@@ -126,6 +135,23 @@ class PolicyROSRunner:
                 self.ema_model = copy.deepcopy(self.model)
             except: # minkowski engine could not be copied. recreate it
                 self.ema_model = hydra.utils.instantiate(self.cfg.policy)
+
+        # configure dataset
+        dataset: BaseDataset
+        dataset = hydra.utils.instantiate(cfg.task.dataset)
+
+        assert isinstance(dataset, BaseDataset), print(f"dataset must be BaseDataset, got {type(dataset)}")
+        train_dataloader = DataLoader(dataset, **cfg.dataloader)
+        normalizer = dataset.get_normalizer()
+
+
+        self.model.set_normalizer(normalizer)
+        if cfg.training.use_ema:
+            self.ema_model.set_normalizer(normalizer)
+
+
+
+        ###################        
         
         lastest_ckpt_path = self.get_checkpoint_path(tag="latest")
         if lastest_ckpt_path.is_file():
@@ -136,10 +162,13 @@ class PolicyROSRunner:
             self.policy = self.ema_model
         self.policy.eval()
         self.policy.cuda()
+
+
         #######################################
         
         # 发布的 ROS 话题
-        self.action_pub = rospy.Publisher("/action_cmd", Float32MultiArray, queue_size=10)
+        self.pose_pub = rospy.Publisher("/desired_pos", Float32MultiArray, queue_size=10)
+        self.wrench_pub = rospy.Publisher("/desired_wrench", Float32MultiArray, queue_size=10)
 
         # 存储数据
         self.bridge = CvBridge()
@@ -167,6 +196,12 @@ class PolicyROSRunner:
         rospy.Subscriber("/ft_sensor/netft_data", WrenchStamped, self.netft_callback)
         rospy.Subscriber("/joint_states", JointState, self.agent_pos_callback)
         print('Subscribed Topics')
+
+    def collect_observations(self, obs_dict):
+        self.history.append(copy.deepcopy(obs_dict))
+
+    def get_history(self):
+        return list(self.history)
 
     def get_closest_data(self, data_list, timestamp):
         # 获取与当前时间戳最接近的数据
@@ -229,14 +264,30 @@ class PolicyROSRunner:
                         "img": img_tensor
                     }
 
+                    # self.collect_observations(obs_dict)
+
+                    # if len(self.history) == self.n_obs_steps:
+                    #     obs_dict = {
+                    #         "state": torch.cat([obs["state"] for obs in self.get_history()], dim=1), 
+                    #         "force": torch.cat([obs["force"] for obs in self.get_history()], dim=1),
+                    #         "img": torch.cat([obs["img"] for obs in self.get_history()], dim=1)
+                    #     }
+                    # else:
+                    #     continue
+
                     with torch.no_grad():
                         action_dict = self.policy.predict_action(obs_dict)
+                        cprint('action_dict:', action_dict, 'green')
                         action_output = action_dict["action"].cpu().numpy().flatten()
 
                     # 发布 action 的 ROS 话题
+                    
+                    cprint('action output:', action_output.shape, 'green')
+                    
                     action_msg = Float32MultiArray()
                     action_msg.data = action_output.tolist()
-                    self.action_pub.publish(action_msg)
+                    self.pose_pub.publish(action_msg)
+
                     
                     rospy.loginfo(f"Published action: {action_output}")
 
