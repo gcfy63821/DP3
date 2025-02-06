@@ -6,7 +6,7 @@ next step is dataset
 
     conda activate dp3
 
-    bash scripts/train_policy.sh ultrasound_dp ultrasound_scan 0120 0 0  
+    bash scripts/train_policy.sh ultrasound_dp ultrasound_scan 0206 0 0  
 
 **0122**
 
@@ -66,3 +66,6 @@ bash scripts/run.sh ultrasound_dp ultrasound_scan 0124 0 0
 **0125**
 normalizer里面action的normalize
 obs的维数
+
+**0206**
+记录一下之后需要做的事情:

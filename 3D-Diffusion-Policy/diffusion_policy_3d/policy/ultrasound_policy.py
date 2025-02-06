@@ -214,7 +214,6 @@ class UltrasoundDP(BasePolicy):
         #     nobs['point_cloud'] = nobs['point_cloud'][..., :3]
         # this_n_point_cloud = nobs['point_cloud']
         
-        
         value = next(iter(nobs.values()))
         B, To = value.shape[:2]
         T = self.horizon
@@ -231,9 +230,11 @@ class UltrasoundDP(BasePolicy):
         global_cond = None
         if self.obs_as_global_cond:
             # condition through global feature
-            # this_nobs = dict_apply(nobs, lambda x: x[:,:To,...].reshape(-1,*x.shape[2:])) # don't know
-            this_nobs = nobs
-            # print(this_nobs['img'].shape)
+
+            this_nobs = dict_apply(nobs, lambda x: x[:,:To,...].reshape(-1,*x.shape[2:])) # don't know
+            # this_nobs = nobs
+            # print('this_nobs img shape:', this_nobs['img'].shape)
+            # print(f'this_nobs shape: {this_nobs}')
             nobs_features = self.obs_encoder(this_nobs)
             if "cross_attention" in self.condition_type:
                 # treat as a sequence

@@ -28,9 +28,13 @@ from diffusion_policy_3d.dataset.base_dataset import BaseDataset
 from diffusion_policy_3d.dataset.ultrasound_dataset import UltrasoundDataset
 from diffusion_policy_3d.policy.dp3 import DP3
 from geometry_msgs.msg import TransformStamped
+from geometry_msgs.msg import PoseStamped, WrenchStamped
+import tf
 import tf2_ros
 from collections import deque
 from torch.utils.data import DataLoader
+import time
+from scipy.spatial.transform import Rotation as R
 
 OmegaConf.register_new_resolver("eval", eval, replace=True)
  
@@ -113,6 +117,34 @@ def rotation_matrix_to_quaternion(R):
     
     return np.array([qw, qx, qy, qz])
 
+def quaternion_multiply(q1, q2):
+    """
+    计算两个四元数的乘积
+    """
+    w1, x1, y1, z1 = q1
+    w2, x2, y2, z2 = q2
+    w = w1 * w2 - x1 * x2 - y1 * y2 - z1 * z2
+    x = w1 * x2 + x1 * w2 + y1 * z2 - z1 * y2
+    y = w1 * y2 - x1 * z2 + y1 * w2 + z1 * x2
+    z = w1 * z2 + x1 * y2 - y1 * x2 + z1 * w2
+    return np.array([w, x, y, z])
+
+def quaternion_inverse(q):
+    """
+    计算四元数的逆
+    """
+    w, x, y, z = q
+    return np.array([w, -x, -y, -z]) / (w**2 + x**2 + y**2 + z**2)
+
+def quarternion_to_euler(q):
+    """
+    Convert quaternion to euler angles
+    """
+    r = R.from_quat(q)
+    return r.as_euler('xyz', degrees=False)
+
+
+
 class PolicyROSRunner:
     def __init__(self, cfg: OmegaConf, output_dir=None):
         self.cfg = copy.deepcopy(cfg)
@@ -167,14 +199,16 @@ class PolicyROSRunner:
         #######################################
         
         # 发布的 ROS 话题
-        self.pose_pub = rospy.Publisher("/desired_pos", Float32MultiArray, queue_size=10)
-        self.wrench_pub = rospy.Publisher("/desired_wrench", Float32MultiArray, queue_size=10)
+        self.pose_pub = rospy.Publisher("/desired_pos", PoseStamped, queue_size=10)
+        self.wrench_pub = rospy.Publisher("/desired_wrench", WrenchStamped, queue_size=10)
 
         # 存储数据
         self.bridge = CvBridge()
         self.agent_pos_data = []
         self.ft_compensated_data = []
         self.netft_data = []
+        self.initial_position = None
+        self.initial_orientation = None
         ########################################
         # 设置视频捕获设备，0 是本地摄像头
         camera_id = 0 # 这个是超声的
@@ -196,6 +230,19 @@ class PolicyROSRunner:
         rospy.Subscriber("/ft_sensor/netft_data", WrenchStamped, self.netft_callback)
         rospy.Subscriber("/joint_states", JointState, self.agent_pos_callback)
         print('Subscribed Topics')
+
+        
+        self.rate = rospy.Rate(30)  # 30Hz
+        self.tf_listener = tf.TransformListener()
+        
+    def get_panda_link8_transform(self):
+        try:
+            self.tf_listener.waitForTransform("/panda_link0", "/panda_link8", rospy.Time(0), rospy.Duration(4.0))
+            (trans, rot) = self.tf_listener.lookupTransform("/panda_link0", "/panda_link8", rospy.Time(0))
+            return np.array(trans), np.array(rot)
+        except (tf.LookupException, tf.ConnectivityException, tf.ExtrapolationException):
+            print("TF Exception")
+            return None, None
 
     def collect_observations(self, obs_dict):
         self.history.append(copy.deepcopy(obs_dict))
@@ -230,12 +277,18 @@ class PolicyROSRunner:
         # 处理输入并运行 policy
         # rate = rospy.Rate(30)  # 10Hz
         print('start running')
+        prev_position = None
+        prev_orientation = None
+        current_time = None
         
         while not rospy.is_shutdown():
             ret, frame = self.cap.read()
             if ret:
                 # 显示视频流
                 cv2.imshow("Video Stream", frame)
+                if current_time is None:
+                    # 避免开始的时候有绿色的帧
+                    time.sleep(1)
                 current_time = rospy.get_time()
 
                 # 获取当前时间戳，查找与此时间戳最接近的数据（同步）
@@ -247,15 +300,37 @@ class PolicyROSRunner:
                     ft, ft_timestamp = synced_ft_compensated
                     netft, netft_timestamp = synced_netft
                     agent_pos, agent_pos_timestamp = synced_agent_pos
-                    position, orientation = get_franka_fk_solution(agent_pos)
+                    # position, orientation = get_franka_fk_solution(agent_pos)
+                    position, orientation = self.get_panda_link8_transform()
+                    if position is None or orientation is None:
+                        continue
+                    euler = quarternion_to_euler(orientation)
 
-                    state = np.concatenate([agent_pos, position, orientation], axis=-1)
+
+                    # 初始化
+                    if self.initial_position is None:
+                        self.initial_position = position
+                        # self.initial_orientation = orientation
+                        self.initial_rpy = euler
+
+                    if prev_position is None:
+                        delta_position = np.zeros_like(position)
+                        # delta_orientation = np.zeros_like(orientation)
+                        delta_rpy = np.zeros_like(euler)
+                    else:
+                        delta_position = position - prev_position
+                        # delta_orientation = quaternion_multiply(orientation, quaternion_inverse(prev_orientation))
+                        delta_rpy = euler - prev_rpy
+
+                    # state = np.concatenate([self.initial_position, self.initial_orientation, position, orientation], axis=-1)
+                    # state = np.concatenate([self.initial_position, self.initial_orientation, delta_position, delta_orientation], axis=-1)
+                    state = np.concatenate([self.initial_position, self.initial_rpy, delta_position, delta_rpy], axis=-1)
                     force = np.concatenate([ft, netft], axis=-1)
                     obs_image = self.preproces_image(frame)
 
-                    state_tensor = torch.tensor(state, dtype=torch.float32, requires_grad=False).unsqueeze(0).to(self.device)
-                    force_tensor = torch.tensor(force, dtype=torch.float32, requires_grad=False).unsqueeze(0).to(self.device)
-                    img_tensor = torch.tensor(obs_image, dtype=torch.float32, requires_grad=False).unsqueeze(0).to(self.device)
+                    state_tensor = torch.tensor(state, dtype=torch.float32, requires_grad=False).unsqueeze(0).unsqueeze(0).to(self.device)
+                    force_tensor = torch.tensor(force, dtype=torch.float32, requires_grad=False).unsqueeze(0).unsqueeze(0).to(self.device)
+                    img_tensor = torch.tensor(obs_image, dtype=torch.float32, requires_grad=False).unsqueeze(0).unsqueeze(0).to(self.device)
 
 
                     obs_dict = {
@@ -276,26 +351,43 @@ class PolicyROSRunner:
                     #     continue
 
                     with torch.no_grad():
+                        # print('obs_dict img:', obs_dict['img'].shape)
                         action_dict = self.policy.predict_action(obs_dict)
-                        cprint('action_dict:', action_dict, 'green')
+                        # print('action_dict:', action_dict)
                         action_output = action_dict["action"].cpu().numpy().flatten()
+
+                        delta_position = action_output[:3]
+                        # delta_orientation = action_output[3:7]
+                        delta_rpy = action_output[3:6]
+
+                        # output_wrench = action_output[7:19]
+                        output_wrench = action_output[6:18]
+                        output_position = delta_position + position
+                        # output_orientation = quaternion_multiply(delta_orientation, orientation)
+                        output_rpy = delta_rpy + euler
+                        output_orientation = R.from_euler('xyz', output_rpy).as_quat()
+
+                    prev_position = position
+                    # prev_orientation = orientation
+                    prev_rpy = euler
 
                     # 发布 action 的 ROS 话题
                     
-                    cprint('action output:', action_output.shape, 'green')
+                    # print('publish action output:', action_output)
+                    self.publish_pose_and_wrench(output_wrench, output_position, output_orientation)
                     
-                    action_msg = Float32MultiArray()
-                    action_msg.data = action_output.tolist()
-                    self.pose_pub.publish(action_msg)
+                    # action_msg = Float32MultiArray()
+                    # action_msg.data = action_output.tolist()
+                    # self.pose_pub.publish(action_msg)
 
                     
-                    rospy.loginfo(f"Published action: {action_output}")
+                    # rospy.loginfo(f"Published action: {action_output}")
 
                     # 发布 TF 变换
-                    self.publish_tf(action_output, frame_id="base_link", child_id="action_frame")
+                    self.publish_tf(output_position, output_orientation, frame_id="panda_link0", child_id="action_frame")
 
 
-            # rate.sleep()
+            self.rate.sleep()
             key = cv2.waitKey(1)
             if key == ord('q'):
                 break
@@ -380,23 +472,57 @@ class PolicyROSRunner:
             include_keys=include_keys)
         return payload
 
-    def publish_tf(self, action, frame_id, child_id):
+    def publish_tf(self, position, orientation, frame_id, child_id):
         br = tf2_ros.TransformBroadcaster()
         t = TransformStamped()
         t.header.stamp = rospy.Time.now()
         t.header.frame_id = frame_id
         t.child_frame_id = child_id
 
-        # 假设 action 数据是 [x, y, z, qx, qy, qz, qw]
-        t.transform.translation.x = action[7]
-        t.transform.translation.y = action[8]
-        t.transform.translation.z = action[9]
-        t.transform.rotation.x = action[10]
-        t.transform.rotation.y = action[11]
-        t.transform.rotation.z = action[12]
-        t.transform.rotation.w = action[13]
+        t.transform.translation.x = position[0]
+        t.transform.translation.y = position[1]
+        t.transform.translation.z = position[2]
+        t.transform.rotation.x = orientation[0]
+        t.transform.rotation.y = orientation[1]
+        t.transform.rotation.z = orientation[2]
+        t.transform.rotation.w = orientation[3]
 
         br.sendTransform(t)
+
+    def publish_pose_and_wrench(self, wrench, position, orientation):
+        pose = np.concatenate([position, orientation])
+        # 创建 WrenchStamped 消息
+        wrench_msg = WrenchStamped()
+        wrench_msg.header.stamp = rospy.Time.now()
+        wrench_msg.header.frame_id = "panda_link0"
+        wrench_msg.wrench.force.x = wrench[0]
+        wrench_msg.wrench.force.y = wrench[1]
+        wrench_msg.wrench.force.z = wrench[2]
+        wrench_msg.wrench.torque.x = wrench[3]
+        wrench_msg.wrench.torque.y = wrench[4]
+        wrench_msg.wrench.torque.z = wrench[5]
+
+        # 发布 WrenchStamped 消息
+        self.wrench_pub.publish(wrench_msg)
+        # rospy.loginfo(f"Published WrenchStamped: {wrench_msg}")
+        rospy.loginfo_throttle(1, f"Published WrenchStamped: {wrench_msg}")
+
+        # 创建 PoseStamped 消息
+        pose_msg = PoseStamped()
+        pose_msg.header.stamp = rospy.Time.now()
+        pose_msg.header.frame_id = "base_link"
+        pose_msg.pose.position.x = pose[0]
+        pose_msg.pose.position.y = pose[1]
+        pose_msg.pose.position.z = pose[2]
+        pose_msg.pose.orientation.x = pose[3]
+        pose_msg.pose.orientation.y = pose[4]
+        pose_msg.pose.orientation.z = pose[5]
+        pose_msg.pose.orientation.w = pose[6]
+
+        # 发布 PoseStamped 消息
+        self.pose_pub.publish(pose_msg)
+        # rospy.loginfo(f"Published PoseStamped: {pose_msg}")
+        rospy.loginfo_throttle(1, f"Published PoseStamped: {pose_msg}")
 
 
 @hydra.main(

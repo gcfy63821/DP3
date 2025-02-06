@@ -9,7 +9,17 @@ from sensor_msgs.msg import JointState
 from geometry_msgs.msg import WrenchStamped
 from cv_bridge import CvBridge
 from os.path import join
+import tf
+import tf2_ros
+from scipy.spatial.transform import Rotation as R
 
+
+def quaternion_to_euler(quaternion):
+    """
+    将四元数转换为欧拉角roll, pitch, yaw
+    """
+    r = R.from_quat(quaternion)
+    return r.as_euler('xyz', degrees=False)
 
 
 def get_tf_mat(i, dh):
@@ -98,9 +108,10 @@ class DataCollector:
         rospy.init_node('data_collector', anonymous=True)
         print('inited ')
         # 设置文件保存路径
-        self.root = '/home/robotics/crq/3D-Diffusion-Policy/3D-Diffusion-Policy/data'
+        # self.root = '/home/robotics/crq/3D-Diffusion-Policy/3D-Diffusion-Policy/data'
+        self.root = '/media/robotics/ST_16T/crq/data'
         self.date = time.strftime('%Y%m%d', time.localtime())
-        self.date2 = time.strftime('%H:%M', time.localtime())
+        self.date2 = time.strftime('%H:%M:%S', time.localtime())
         self.imwrite_dir = join(self.root, 'record_data', self.date, self.date2)
         os.makedirs(self.imwrite_dir, exist_ok=True)
         
@@ -157,12 +168,21 @@ class DataCollector:
         
         # 发布图像到 ROS 话题
         # self.pub_image = rospy.Publisher("/camera/rgb/image_raw", Image, queue_size=10)
-        
+
+        self.tf_listener = tf.TransformListener()
+
         # 计数器和同步机制
         self.count = 0
-        self.rate = rospy.Rate(30)  # 采集频率
+        self.rate = rospy.Rate(120)  # 采集频率
         
-        
+    def get_panda_link8_transform(self):
+        try:
+            self.tf_listener.waitForTransform("/panda_link0", "/panda_link8", rospy.Time(0), rospy.Duration(4.0))
+            (trans, rot) = self.tf_listener.lookupTransform("/panda_link0", "/panda_link8", rospy.Time(0))
+            return np.array(trans), np.array(rot)
+        except (tf.LookupException, tf.ConnectivityException, tf.ExtrapolationException):
+            print("TF Exception")
+            return None, None
 
     def ft_comp_callback(self, msg):
         ft_compensated = np.array([
@@ -211,6 +231,7 @@ class DataCollector:
                 synced_ft_compensated = self.get_closest_data(self.ft_compensated_data, current_time)
                 synced_netft = self.get_closest_data(self.netft_data, current_time)
                 synced_agent_pos = self.get_closest_data(self.agent_pos_data, current_time)
+                
 
                 # 创建字典存储图像和对应的数据
                 data_dict = {}
@@ -225,8 +246,10 @@ class DataCollector:
                     ft, ft_timestamp = synced_ft_compensated
                     netft, netft_timestamp = synced_netft
                     agent_pos, agent_pos_timestamp = synced_agent_pos
-                    # fk
-                    position, orientation = get_franka_fk_solution(agent_pos)
+                    position, orientation = self.get_panda_link8_transform()
+                    if position is None or orientation is None:
+                        continue
+                    euler = quaternion_to_euler(orientation)
                     
                     # 将图像数据转为字典存储
                     data_dict['image'] = frame  # 图像数据是 OpenCV 格式的 NumPy 数组
@@ -236,6 +259,7 @@ class DataCollector:
                     data_dict['position'] = position # cartesian 
                     data_dict['orientation'] = orientation
                     data_dict['timestamp'] = current_time  # 当前时间戳
+                    data_dict['euler'] = euler # RPY
 
                     # 保存字典数据到文件
                     data_filename = join(self.imwrite_dir, f'{self.date2}_{self.count:03d}_data.npy')

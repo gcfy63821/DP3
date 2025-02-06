@@ -6,6 +6,8 @@ import pytorch3d.ops as torch3d_ops
 import torchvision
 from termcolor import cprint
 import tqdm
+from scipy.spatial.transform import Rotation as R
+
 
 def preproces_image(image):
     img_size = 84
@@ -18,10 +20,32 @@ def preproces_image(image):
     image = image.cpu().numpy()
     return image
 
+def quaternion_multiply(q1, q2):
+    """
+    计算两个四元数的乘积
+    """
+    w1, x1, y1, z1 = q1
+    w2, x2, y2, z2 = q2
+    w = w1 * w2 - x1 * x2 - y1 * y2 - z1 * z2
+    x = w1 * x2 + x1 * w2 + y1 * z2 - z1 * y2
+    y = w1 * y2 - x1 * z2 + y1 * w2 + z1 * x2
+    z = w1 * z2 + x1 * y2 - y1 * x2 + z1 * w2
+    return np.array([w, x, y, z])
+
+def quaternion_inverse(q):
+    """
+    计算四元数的逆
+    """
+    w, x, y, z = q
+    return np.array([w, -x, -y, -z]) / (w**2 + x**2 + y**2 + z**2)
+
+
 # 输入路径（包含.npy文件）
-expert_data_path = '/home/robotics/crq/3D-Diffusion-Policy/3D-Diffusion-Policy/data/record_data/20250120'
-save_data_path = '/home/robotics/crq/3D-Diffusion-Policy/3D-Diffusion-Policy/data/ultrasound_data.zarr'
-N = 5  # 每隔 N 个文件选择 1 个文件，设置为你需要的间隔值
+# expert_data_path = '/home/robotics/crq/3D-Diffusion-Policy/3D-Diffusion-Policy/data/record_data/20250120'
+# save_data_path = '/home/robotics/crq/3D-Diffusion-Policy/3D-Diffusion-Policy/data/ultrasound_data.zarr'
+expert_data_path = '/media/robotics/ST_16T/crq/data/record_data/20250206'
+save_data_path = '/home/robotics/crq/3D-Diffusion-Policy/3D-Diffusion-Policy/data/ultrasound_data0206.zarr'
+N = 4  # 采样间隔
 
 # 获取目录下所有子文件夹
 subfolders = [os.path.join(expert_data_path, f) for f in os.listdir(expert_data_path) if os.path.isdir(os.path.join(expert_data_path, f))]
@@ -41,6 +65,7 @@ if os.path.exists(save_data_path):
     cprint("If you want to overwrite, delete the existing directory first.", "red")
     cprint("Do you want to overwrite? (y/n)", "red")
     user_input = 'y'
+    # user_input = input()
     if user_input == 'y':
         cprint('Overwriting {}'.format(save_data_path), 'red')
         os.system('rm -rf {}'.format(save_data_path))
@@ -60,6 +85,9 @@ for subfolder in subfolders:
     for sample in range(N):
         current_count = 0
         start_index = len(state_arrays)
+        prev_position = None
+        prev_state = None
+        prev_rpy = None
         for k, npy_file in enumerate(npy_files):
             if k == 0:
                 k += sample
@@ -72,26 +100,65 @@ for subfolder in subfolders:
             # 加载 .npy 文件
             data_dict = np.load(npy_file, allow_pickle=True).item()
 
+            if k == 0:
+                initial_position = data_dict['position']
+                # initial_orientation = data_dict['orientation']
+                # initial_rpy = R.from_quat(initial_orientation).as_euler('xyz', degrees=True)
+                initial_rpy = data_dict['euler']
+
+            current_position = data_dict['position']
+            # current_orientation = data_dict['orientation']
+            current_rpy = data_dict['euler']
+            # current_agent_pos = data_dict['agent_pos']
+
+            if prev_position is None:
+                delta_position = np.zeros_like(current_position)
+                # delta_orientation = np.zeros_like(current_orientation)
+                delta_rpy = np.zeros_like(current_rpy)
+                # delta_agent_pos = np.zeros_like(current_agent_pos)
+            else:
+                delta_position = current_position - prev_position
+                # delta_orientation = current_orientation - prev_orientation
+                delta_rpy = current_rpy - prev_rpy
+                # delta_orientation = quaternion_multiply(current_orientation, quaternion_inverse(prev_orientation))
+                # delta_agent_pos = current_agent_pos - prev_agent_pos
+
+            prev_position = current_position
+            # prev_orientation = current_orientation
+            prev_rpy = current_rpy
+            # prev_agent_pos = current_agent_pos
+
             obs_image = data_dict['image']
             obs_image = preproces_image(obs_image)
-            force = np.concatenate([data_dict['ft_compensated'],  data_dict['netft']], axis=-1)
-            robot_state = np.concatenate([data_dict['agent_pos'], data_dict['position'], data_dict['orientation']], axis=-1)
-            timestamp = data_dict['timestamp'] # 记录时间戳
-            
+            force = np.concatenate([data_dict['ft_compensated'], data_dict['netft']], axis=-1)
+            # robot_state = np.concatenate([initial_position, initial_orientation, delta_position, delta_orientation], axis=-1)
+            robot_state = np.concatenate([initial_position, initial_rpy, delta_position, delta_rpy], axis=-1)
+            timestamp = data_dict['timestamp']  # 记录时间戳
+        
             img_arrays.append(obs_image)
             force_arrays.append(force)
             state_arrays.append(robot_state)
             timestamp_arrays.append(timestamp)
+
+            if prev_state is not None:
+                action_arrays.append(np.concatenate([prev_state, prev_force], axis=-1))
+            else:
+                action_arrays.append(np.zeros(18))
+
+            # prev_state = np.concatenate([delta_position, delta_orientation], axis=-1)
+            prev_state = np.concatenate([delta_position, delta_rpy], axis=-1)
+            prev_force = force
             
         episode_ends_arrays.append(total_count)
 
         # 如果需要填充action数组
-        for j in range(current_count):
-            if j < N:
-                continue
-            action_arrays.append(state_arrays[j + start_index])  # 根据需要的逻辑填充
-        for j in range(N):
-            action_arrays.append(state_arrays[-1])  # 填充最后一个状态
+        # for j in range(current_count):
+        #     if j < N:
+        #         continue
+        #     action_arrays.append(state_arrays[j + start_index])  # 根据需要的逻辑填充
+        # for j in range(N):
+        #     action_arrays.append(state_arrays[-1])  # 填充最后一个状态
+        
 
 # 创建 zarr 文件
 zarr_root = zarr.group(save_data_path)

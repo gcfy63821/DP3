@@ -34,7 +34,8 @@ print('fps:',fps)
 
 
 # 设置视频保存的文件夹路径和文件名
-save_dir = '/home/robotics/crq/3D-Diffusion-Policy/3D-Diffusion-Policy/data'
+# save_dir = '/home/robotics/crq/3D-Diffusion-Policy/3D-Diffusion-Policy/data'
+save_dir = 'media/robotics/ST_16T/crq/data'
 if not os.path.exists(save_dir):  
     os.makedirs(save_dir)
 
