@@ -199,7 +199,7 @@ class PolicyROSRunner:
         #######################################
         
         # 发布的 ROS 话题
-        self.pose_pub = rospy.Publisher("/desired_pos", PoseStamped, queue_size=10)
+        self.pose_pub = rospy.Publisher("/desired_pose", PoseStamped, queue_size=10)
         self.wrench_pub = rospy.Publisher("/desired_wrench", WrenchStamped, queue_size=10)
 
         # 存储数据
@@ -235,10 +235,10 @@ class PolicyROSRunner:
         self.rate = rospy.Rate(30)  # 30Hz
         self.tf_listener = tf.TransformListener()
         
-    def get_panda_link8_transform(self):
+    def get_panda_EE_transform(self):
         try:
-            self.tf_listener.waitForTransform("/panda_link0", "/panda_link8", rospy.Time(0), rospy.Duration(4.0))
-            (trans, rot) = self.tf_listener.lookupTransform("/panda_link0", "/panda_link8", rospy.Time(0))
+            self.tf_listener.waitForTransform("/panda_link0", "/panda_EE", rospy.Time(0), rospy.Duration(4.0))
+            (trans, rot) = self.tf_listener.lookupTransform("/panda_link0", "/panda_EE", rospy.Time(0))
             return np.array(trans), np.array(rot)
         except (tf.LookupException, tf.ConnectivityException, tf.ExtrapolationException):
             print("TF Exception")
@@ -301,7 +301,7 @@ class PolicyROSRunner:
                     netft, netft_timestamp = synced_netft
                     agent_pos, agent_pos_timestamp = synced_agent_pos
                     # position, orientation = get_franka_fk_solution(agent_pos)
-                    position, orientation = self.get_panda_link8_transform()
+                    position, orientation = self.get_panda_EE_transform()
                     if position is None or orientation is None:
                         continue
                     euler = quarternion_to_euler(orientation)

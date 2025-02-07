@@ -174,6 +174,14 @@ class DataCollector:
         # 计数器和同步机制
         self.count = 0
         self.rate = rospy.Rate(120)  # 采集频率
+        cv2.namedWindow("Video Stream")
+        cv2.setMouseCallback("Video Stream", self.on_mouse_click)
+
+
+    def on_mouse_click(self, event, x, y, flags, param):
+        if event == cv2.EVENT_LBUTTONDOWN:
+            print("Left mouse button clicked - exiting data collection")
+            self.running = False
         
     def get_panda_link8_transform(self):
         try:
@@ -221,6 +229,8 @@ class DataCollector:
             if ret:
                 # 显示视频流
                 cv2.imshow("Video Stream", frame)
+                if cv2.waitKey(1) & 0xFF == ord('q'):
+                    break
                 
                 # 将帧写入到视频文件
                 self.out.write(frame)
@@ -271,8 +281,6 @@ class DataCollector:
                 self.count += 1  # 增加计数器
             # self.rate.sleep() 
             self.rate.sleep()  # 控制采集频率
-            if cv2.waitKey(1) & 0xFF == ord('q'):
-                break
         self.cap.release()
         self.out.release()
         cv2.destroyAllWindows()
