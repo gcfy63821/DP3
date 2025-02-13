@@ -122,3 +122,34 @@ roslaunch franka_us_controllers my_ipd_force_controller_dp.launch
 
 
 现在runner里面改成EE了。机械臂可以跟随policy的指令运动，目前的效果是会竖直向下动
+
+**0211**
+
+搞一个纯位置然后用相同输入看看
+
+bash scripts/run_orbbec.sh ultrasound_dp ultrasound_force 0211-6 0 0 
+用pretrained的，输入相对初始位置的位移、速度表征和位置。可以一定程度上跟随轨迹。
+
+明天试着修改代码可以输出多个观测序列、加入点云。
+
+roslaunch azure_kinect_ros_driver driver_orbbec.launch body_tracking_enabled:=false overwrite_robot_description:=false
+
+**0212**
+
+visuallize_pc.py可以查看点云，点云用env_prepare.launch得到的来当做输入，可能需要先calibrate再进行crop
+
+今天先试着：
+1.把n_obs_steps和n_action_steps搞出来 已完成
+2.采集点云数据并且跑通 
+    - 先写一个encoder，dataset包含图像，点云，深度和其他 已完成
+    - 写采数据 已完成
+    - 写runner
+3.在速度表征里面把时间带上
+
+目前已debug的代码版本在run_orbbec, ultrasound_force
+
+bash scripts/train_policy.sh us_pc_dp ultrasound_pc 0212-1 0 0
+
+**0213**
+现在进行数据处理使用的是robodiff这个环境，之后估计想用点云输入也得使用这个环境。
+把关于imagined robot的部分注释掉了

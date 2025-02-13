@@ -1,6 +1,6 @@
 # modified from simple dp3
 defaults:
-  - task: scan
+  - task: pc
 
 name: train_ultrasound_dp
 
@@ -18,7 +18,7 @@ keypoint_visible_rate: 1.0
 obs_as_global_cond: True
 
 policy:
-  _target_: diffusion_policy_3d.policy.ultrasound_policy.UltrasoundDP
+  _target_: diffusion_policy_3d.policy.ultrasound_policy.USPCDP
   use_point_crop: true
   condition_type: film
   use_down_condition: true
@@ -60,11 +60,24 @@ policy:
   ultrasound_encoder_cfg:
     out_channels: ${policy.encoder_output_dim}
     resnet_output_dim: 64  # ResNet feature output dimension
-    state_output_dim: 64
-    force_output_dim: 64
+    state_output_dim: 32
+    force_output_dim: 32
     pretrained: False  # Whether to use pretrained weights for ResNet
     use_layernorm: False
     debug: False
+
+  # whether to use point cloud's color
+  use_pc_color: false
+  # type of pointnet
+  pointnet_type: "pointnet"
+
+
+  pointcloud_encoder_cfg:
+    in_channels: 3
+    out_channels: ${policy.encoder_output_dim}
+    use_layernorm: true
+    final_norm: layernorm # layernorm, none
+    normal_channel: false
 
 
 ema:
@@ -119,10 +132,10 @@ logging:
   id: null
   mode: online
   name: ${training.seed}
-  project: us_dp
+  project: us_pc_dp
   resume: true
   tags:
-  - us_dp
+  - us_pc_dp
 
 
 checkpoint:

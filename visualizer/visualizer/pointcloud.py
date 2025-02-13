@@ -119,7 +119,7 @@ class Visualizer:
         def index():
             return render_template_string('''<div>{{ div|safe }}</div>''', div=div)
         
-        self.app.run(debug=True, use_reloader=False)
+        self.app.run(debug=True, use_reloader=False, port=5001)
 
     def visualize_pointcloud_and_save(self, pointcloud, color:tuple=None, save_path=None):
         trace = self._generate_trace(pointcloud, color=color, size=6, opacity=1.0)

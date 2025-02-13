@@ -7,7 +7,7 @@ import torchvision
 from termcolor import cprint
 import tqdm
 from scipy.spatial.transform import Rotation as R
-
+import copy
 
 def preproces_image(image):
     img_size = 84
@@ -15,6 +15,10 @@ def preproces_image(image):
     image = image.astype(np.float32)
     image = torch.from_numpy(image).cuda()
     image = image.permute(2, 0, 1) # HxWx4 -> 4xHxW
+    # 如果图像是 bgra8 格式，删除透明通道
+    if image.shape[0] == 4:
+        image = image[:3, :, :] # 只保留 BGR 通道
+    
     image = torchvision.transforms.functional.resize(image, (img_size, img_size))
     image = image.permute(1, 2, 0) # 4xHxW -> HxWx4
     image = image.cpu().numpy()
@@ -43,9 +47,10 @@ def quaternion_inverse(q):
 # 输入路径（包含.npy文件）
 # expert_data_path = '/home/robotics/crq/3D-Diffusion-Policy/3D-Diffusion-Policy/data/record_data/20250120'
 # save_data_path = '/home/robotics/crq/3D-Diffusion-Policy/3D-Diffusion-Policy/data/ultrasound_data.zarr'
-expert_data_path = '/media/robotics/ST_16T/crq/data/record_data/force_turn'
-save_data_path = '/home/robotics/crq/3D-Diffusion-Policy/3D-Diffusion-Policy/data/ultrasound_data_force.zarr'
-N = 4  # 采样间隔
+expert_data_path = '/media/robotics/ST_16T/crq/data/record_data/orbbec'
+save_data_path = '/home/robotics/crq/3D-Diffusion-Policy/3D-Diffusion-Policy/data/ultrasound_data_move.zarr'
+N = 10  # 采样间隔
+T = 5
 
 # 获取目录下所有子文件夹
 subfolders = [os.path.join(expert_data_path, f) for f in os.listdir(expert_data_path) if os.path.isdir(os.path.join(expert_data_path, f))]
@@ -90,75 +95,52 @@ for subfolder in subfolders:
         prev_state = None
         prev_rpy = None
         for k, npy_file in enumerate(npy_files):
-            if k == 0:
-                k += sample
-            if k % N != 0:
+            if (k + sample) % N != 0:
                 continue  # 每隔 N 个文件选择 1 个
-            total_count += 1
-            current_count += 1
+
             cprint(f'Processing {npy_file}', 'green')
             
             # 加载 .npy 文件
             data_dict = np.load(npy_file, allow_pickle=True).item()
 
-            if k == 0:
-                initial_position = data_dict['position']
-                # initial_orientation = data_dict['orientation']
-                # initial_rpy = R.from_quat(initial_orientation).as_euler('xyz', degrees=True)
-                initial_rpy = data_dict['euler']
+            if current_count == 0:
+                initial_position = copy.deepcopy(data_dict['position'])
+                initial_rpy = copy.deepcopy(data_dict['euler'])
+            total_count += 1
+            current_count += 1
 
             current_position = data_dict['position']
-            # current_orientation = data_dict['orientation']
             current_rpy = data_dict['euler']
-            # current_agent_pos = data_dict['agent_pos']
 
-            if prev_position is None:
-                delta_position = np.zeros_like(current_position)
-                # delta_orientation = np.zeros_like(current_orientation)
-                delta_rpy = np.zeros_like(current_rpy)
-                # delta_agent_pos = np.zeros_like(current_agent_pos)
-                position_to_initial = np.zeros_like(current_position)
-                rpy_to_initial = np.zeros_like(current_rpy)
-            else:
-                delta_position = current_position - prev_position
-                # delta_orientation = current_orientation - prev_orientation
-                delta_rpy = current_rpy - prev_rpy
-                # delta_orientation = quaternion_multiply(current_orientation, quaternion_inverse(prev_orientation))
-                # delta_agent_pos = current_agent_pos - prev_agent_pos
-                position_to_initial = current_position - initial_position
-                rpy_to_initial = current_rpy - initial_rpy
+            position_to_initial = current_position - initial_position
+            rpy_to_initial = current_rpy - initial_rpy
 
+            delta_position = current_position - prev_position if prev_position is not None else np.zeros(3)
+            delta_rpy = current_rpy - prev_rpy if prev_rpy is not None else np.zeros(3)
 
-            prev_position = current_position
-            # prev_orientation = current_orientation
-            prev_rpy = current_rpy
-            # prev_agent_pos = current_agent_pos
+            prev_position = copy.deepcopy(current_position)
+            prev_rpy = copy.deepcopy(current_rpy)
+
 
             obs_image = data_dict['image']
             obs_image = preproces_image(obs_image)
-            # force = np.concatenate([data_dict['ft_compensated'], data_dict['netft']], axis=-1)
             force = data_dict['ft_compensated']
-            # robot_state = np.concatenate([initial_position, initial_orientation, delta_position, delta_orientation], axis=-1)
-            robot_state = np.concatenate([position_to_initial, rpy_to_initial, delta_position, delta_rpy], axis=-1)
+            robot_state = np.concatenate([position_to_initial, rpy_to_initial, current_position, current_rpy, delta_position, delta_rpy], axis=-1)
             timestamp = data_dict['timestamp']  # 记录时间戳
-            state = np.concatenate([delta_position, delta_rpy, data_dict['ft_compensated']], axis=-1)
+            action_state = np.concatenate([current_position, current_rpy, data_dict['ft_compensated']], axis=-1)
+            # action_state = np.concatenate([delta_position, delta_rpy, force], axis=-1)
         
             img_arrays.append(obs_image)
             force_arrays.append(force)
             state_arrays.append(robot_state)
             timestamp_arrays.append(timestamp)
-            action_state_arrays.append(state)
+            if current_count >= T:
+                action_arrays.append(action_state)
 
         episode_ends_arrays.append(total_count)
 
-        # 如果需要填充action数组
-        for j in range(current_count):
-            if j < N:
-                continue
-            action_arrays.append(action_state_arrays[j + start_index])  # 根据需要的逻辑填充
-        for j in range(N):
-            zero = np.zeros_like(action_state_arrays[start_index])
-            action_arrays.append(zero)
+        while len(action_arrays) < len(img_arrays):
+            action_arrays.append(action_state)
         
 
 # 创建 zarr 文件

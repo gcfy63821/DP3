@@ -1,0 +1,25 @@
+name: ultrasound_force
+
+task_name: force
+
+image_shape: &image_shape [3, 84, 84]
+shape_meta: &shape_meta
+  # acceptable types: rgb, low_dim
+  obs:
+    state:
+      shape: [12]
+      type: low_dim
+  action:
+    shape: [12] #state + force
+
+env_runner: null
+
+dataset:
+  _target_: diffusion_policy_3d.dataset.ultrasound_dataset.UltrasoundDataset
+  zarr_path: data/ultrasound_data_move.zarr
+  horizon: ${horizon}
+  pad_before: ${eval:'${n_obs_steps}-1'}
+  pad_after: ${eval:'${n_action_steps}-1'}
+  seed: 42
+  val_ratio: 0.02
+  max_train_episodes: 90

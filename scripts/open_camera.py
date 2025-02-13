@@ -4,7 +4,8 @@ import os
 import datetime
 
 # 设置视频捕获设备，0 是本地摄像头
-camera_id = 0 # 这个是超声的
+# camera_id = 0 # 这个是超声的
+camera_id = 2
 cap = cv2.VideoCapture(camera_id, cv2.CAP_V4L2)
 
 if not cap.isOpened():

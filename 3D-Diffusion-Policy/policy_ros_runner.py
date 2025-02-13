@@ -149,7 +149,7 @@ class PolicyROSRunner:
     def __init__(self, cfg: OmegaConf, output_dir=None):
         self.cfg = copy.deepcopy(cfg)
         self.device = torch.device(self.cfg.training.device)
-        self.output_dir = '3D-Diffusion-Policy/data/outputs/ultrasound_scan-ultrasound_dp-0120_seed0'
+        self.output_dir = 'data/outputs/ultrasound_force-ultrasound_dp-0212-1_seed0'
 
         # 初始化 ROS 节点
         rospy.init_node('ultrasound_policy_runner', anonymous=True)
@@ -232,7 +232,7 @@ class PolicyROSRunner:
         print('Subscribed Topics')
 
         
-        self.rate = rospy.Rate(30)  # 30Hz
+        self.rate = rospy.Rate(10) # 10Hz
         self.tf_listener = tf.TransformListener()
         
     def get_panda_EE_transform(self):
@@ -293,12 +293,14 @@ class PolicyROSRunner:
 
                 # 获取当前时间戳，查找与此时间戳最接近的数据（同步）
                 synced_ft_compensated = self.get_closest_data(self.ft_compensated_data, current_time)
-                synced_netft = self.get_closest_data(self.netft_data, current_time)
+                # synced_netft = self.get_closest_data(self.netft_data, current_time)
                 synced_agent_pos = self.get_closest_data(self.agent_pos_data, current_time)
 
-                if synced_ft_compensated and synced_netft and synced_agent_pos:
-                    ft, ft_timestamp = synced_ft_compensated
-                    netft, netft_timestamp = synced_netft
+                # if synced_ft_compensated  and synced_agent_pos:
+                if synced_agent_pos:
+                    # ft, ft_timestamp = synced_ft_compensated
+                    ft = np.zeros(6)
+                    # netft, netft_timestamp = synced_netft
                     agent_pos, agent_pos_timestamp = synced_agent_pos
                     # position, orientation = get_franka_fk_solution(agent_pos)
                     position, orientation = self.get_panda_EE_transform()
@@ -309,23 +311,31 @@ class PolicyROSRunner:
 
                     # 初始化
                     if self.initial_position is None:
-                        self.initial_position = position
+                        # self.initial_position = position
+                        self.initial_position = copy.deepcopy(position)
                         # self.initial_orientation = orientation
-                        self.initial_rpy = euler
+                        # self.initial_rpy = euler
+                        self.initial_rpy = copy.deepcopy(euler)
 
                     if prev_position is None:
                         delta_position = np.zeros_like(position)
                         # delta_orientation = np.zeros_like(orientation)
                         delta_rpy = np.zeros_like(euler)
+                        position_to_initial = np.zeros_like(position)
+                        rpy_to_initial = np.zeros_like(euler)
                     else:
                         delta_position = position - prev_position
                         # delta_orientation = quaternion_multiply(orientation, quaternion_inverse(prev_orientation))
                         delta_rpy = euler - prev_rpy
+                        position_to_initial = position - self.initial_position
+                        rpy_to_initial = euler - self.initial_rpy
 
                     # state = np.concatenate([self.initial_position, self.initial_orientation, position, orientation], axis=-1)
                     # state = np.concatenate([self.initial_position, self.initial_orientation, delta_position, delta_orientation], axis=-1)
-                    state = np.concatenate([self.initial_position, self.initial_rpy, delta_position, delta_rpy], axis=-1)
-                    force = np.concatenate([ft, netft], axis=-1)
+                    # state = np.concatenate([self.initial_position, self.initial_rpy, delta_position, delta_rpy], axis=-1)
+                    # state = np.concatenate([position_to_initial, rpy_to_initial, delta_position, delta_rpy], axis=-1)
+                    state = np.concatenate([position_to_initial, rpy_to_initial, position, euler], axis=-1)
+                    force = ft
                     obs_image = self.preproces_image(frame)
 
                     state_tensor = torch.tensor(state, dtype=torch.float32, requires_grad=False).unsqueeze(0).unsqueeze(0).to(self.device)
@@ -352,7 +362,10 @@ class PolicyROSRunner:
 
                     with torch.no_grad():
                         # print('obs_dict img:', obs_dict['img'].shape)
+                        # predict_start_time = time.time()
                         action_dict = self.policy.predict_action(obs_dict)
+                        # predict_end_time = time.time()
+                        # print('predict time:', predict_end_time - predict_start_time)
                         # print('action_dict:', action_dict)
                         action_output = action_dict["action"].cpu().numpy().flatten()
 
@@ -361,10 +374,11 @@ class PolicyROSRunner:
                         delta_rpy = action_output[3:6]
 
                         # output_wrench = action_output[7:19]
-                        output_wrench = action_output[6:18]
+                        output_wrench = action_output[6:12]
                         output_position = delta_position + position
-                        # output_orientation = quaternion_multiply(delta_orientation, orientation)
+                        # output_position = action_output[:3]
                         output_rpy = delta_rpy + euler
+                        # output_rpy = action_output[3:6]
                         output_orientation = R.from_euler('xyz', output_rpy).as_quat()
 
                     prev_position = position
@@ -385,6 +399,11 @@ class PolicyROSRunner:
 
                     # 发布 TF 变换
                     self.publish_tf(output_position, output_orientation, frame_id="panda_link0", child_id="action_frame")
+                else:
+                    if synced_ft_compensated is None:
+                        rospy.logwarn("No synced ft compensated data")
+                    if synced_agent_pos is None:
+                        rospy.logwarn("No synced agent pos data")
 
 
             self.rate.sleep()
@@ -453,7 +472,13 @@ class PolicyROSRunner:
 
         for key, value in payload['state_dicts'].items():
             if key not in exclude_keys:
-                self.__dict__[key].load_state_dict(value, **kwargs)
+                if key in self.__dict__:
+                    try:
+                        self.__dict__[key].load_state_dict(value, **kwargs)
+                    except ValueError as e:
+                        cprint(f"Error loading state_dict for {key}: {e}", 'red')
+                else:
+                    cprint(f"Warning: Key '{key}' not found in self.__dict__. Skipping.", 'yellow')
         for key in include_keys:
             if key in payload['pickles']:
                 self.__dict__[key] = dill.loads(payload['pickles'][key])

@@ -1,6 +1,6 @@
-name: ultrasound_scan
+name: ultrasound_force
 
-task_name: scan
+task_name: force
 
 image_shape: &image_shape [3, 84, 84]
 shape_meta: &shape_meta
@@ -10,13 +10,13 @@ shape_meta: &shape_meta
         shape: *image_shape
         type: rgb
     state:
-      shape: [12]
+      shape: [18]
       type: low_dim
     force:
-      shape: [12]
+      shape: [6]
       type: low_dim
   action:
-    shape: [18] # state + force
+    shape: [12] #state + force
 
 env_runner: null
   # _target_: diffusion_policy_3d.env_runner.ultrasound_runner.UltrasoundRunner
@@ -29,7 +29,7 @@ env_runner: null
 
 dataset:
   _target_: diffusion_policy_3d.dataset.ultrasound_dataset.UltrasoundDataset
-  zarr_path: data/ultrasound_data_arm.zarr
+  zarr_path: data/ultrasound_data_move.zarr
   horizon: ${horizon}
   pad_before: ${eval:'${n_obs_steps}-1'}
   pad_after: ${eval:'${n_action_steps}-1'}
