@@ -17,7 +17,7 @@ from diffusion_policy_3d.model.diffusion.mask_generator import LowdimMaskGenerat
 from diffusion_policy_3d.common.pytorch_util import dict_apply
 from diffusion_policy_3d.common.model_util import print_params
 from diffusion_policy_3d.model.vision.pointnet_extractor import DP3Encoder
-from diffusion_policy_3d.model.vision.my_encoder import UltrasoundDPEncoder
+from diffusion_policy_3d.model.vision.my_encoder import PositionEncoder
 from diffusion_policy_3d.dataset.base_dataset import BaseDataset
 from torch.utils.data import DataLoader
 

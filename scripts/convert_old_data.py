@@ -20,6 +20,13 @@ def preproces_image(image):
     image = image.cpu().numpy()
     return image
 
+def quaternion_to_euler(quaternion):
+    """
+    将四元数转换为欧拉角roll, pitch, yaw
+    """
+    r = R.from_quat(quaternion)
+    return r.as_euler('xyz', degrees=False)
+
 def quaternion_multiply(q1, q2):
     """
     计算两个四元数的乘积
@@ -48,10 +55,10 @@ def extract_timestamp(file_path):
 # 输入路径（包含.npy文件）
 # expert_data_path = '/home/robotics/crq/3D-Diffusion-Policy/3D-Diffusion-Policy/data/record_data/20250120'
 # save_data_path = '/home/robotics/crq/3D-Diffusion-Policy/3D-Diffusion-Policy/data/ultrasound_data.zarr'
-expert_data_path = '/media/robotics/ST_16T/crq/data/record_data/20250220'
+expert_data_path = '/media/robotics/ST_16T/crq/data/record_data/neck'
 save_data_path = '/home/robotics/crq/3D-Diffusion-Policy/3D-Diffusion-Policy/data/ultrasound_data_neck.zarr'
-N = 10  # 采样间隔
-T = 3
+N = 30  # 采样间隔
+T = 4
 # 获取目录下所有子文件夹
 subfolders = [os.path.join(expert_data_path, f) for f in os.listdir(expert_data_path) if os.path.isdir(os.path.join(expert_data_path, f))]
 subfolders = sorted(subfolders)
@@ -95,33 +102,28 @@ for subfolder in subfolders:
         prev_position = None
         prev_state = None
         prev_rpy = None
-        prev_timestamp = None
+        if sample % 9 != 0:
+            continue
         for k, npy_file in enumerate(npy_files):
-            # if (k + sample) % N != 0:
-            #     continue  # 每隔 N 个文件选择 1 个
+            if (k + sample) % N != 0:
+                continue  # 每隔 N 个文件选择 1 个
 
-            if current_count==0:
-                if k < sample:
-                    continue
+            cprint(f'Processing {npy_file}', 'green')
             
             # 加载 .npy 文件
             data_dict = np.load(npy_file, allow_pickle=True).item()
 
             if current_count == 0:
                 initial_position = copy.deepcopy(data_dict['position'])
-                initial_rpy = copy.deepcopy(data_dict['euler'])
-
-            current_position = data_dict['position']
-            current_rpy = data_dict['euler']
-            timestamp = data_dict['timestamp']
-
-            if prev_timestamp is not None:
-                if timestamp - prev_timestamp < 0.1:
-                    continue
-            
-            cprint(f'Processing {npy_file}', 'green')
+                initial_rpy = quaternion_to_euler(data_dict['orientation'])
             total_count += 1
             current_count += 1
+
+            current_position = data_dict['position']
+            current_rpy = quaternion_to_euler(data_dict['orientation'])
+            timestamp = data_dict['timestamp']
+
+            
 
             position_to_initial = current_position - initial_position
             rpy_to_initial = current_rpy - initial_rpy
@@ -168,6 +170,7 @@ for subfolder in subfolders:
         while len(action_arrays) < len(force_arrays):
             action_arrays.append(action_state)
         
+        sample += 3
 
         
 

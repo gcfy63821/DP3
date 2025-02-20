@@ -143,8 +143,8 @@ visuallize_pc.py可以查看点云，点云用env_prepare.launch得到的来当�
 2.采集点云数据并且跑通 
     - 先写一个encoder，dataset包含图像，点云，深度和其他 已完成
     - 写采数据 已完成
-    - 写runner
-3.在速度表征里面把时间带上
+    - 写runner 完成
+3.在速度表征里面把时间带上 完成
 
 目前已debug的代码版本在run_orbbec, ultrasound_force
 
@@ -153,3 +153,90 @@ bash scripts/train_policy.sh us_pc_dp ultrasound_pc 0212-1 0 0
 **0213**
 现在进行数据处理使用的是robodiff这个环境，之后估计想用点云输入也得使用这个环境。
 把关于imagined robot的部分注释掉了
+
+**0214**
+想办法赶紧把加速搞定
+先写runner看一眼eval里面的情况
+runner写好了，但是注意：里面的很多参数除了用L2的都没有设置，因为没有设定什么算完成了轨迹。
+然后train里面修改了一处，把304行注释了，认为step_log['test_mean_score'] = - train_loss
+说明这个inference的速度问题不是来自模型本身，应该是数据存储的问题。
+接下来根据inference代码来修改我们的inference代码
+
+原本的环境改好了，现在所有的都用dp3就可以
+
+**0215**
+
+关于针对加点云的一些尝试：
+在3D-Diffusion-Policy/diffusion_policy_3d/policy/ultrasound_policy.py 加入USPCDP，为使用混合encoder的policy，参考simple dp3进行修改得到
+3D-Diffusion-Policy/diffusion_policy_3d/model/vision/my_encoder.py中写了混合encoder，与无点云的版本只加入了pointcloud
+3D-Diffusion-Policy/diffusion_policy_3d/env_runner/ultrasound_runner.py中为eval时用到的runner
+
+
+今天把只有力和位置的代码做个测试吧
+
+bash scripts/train_policy.sh us_force_position_dp ultrasound_force_position 0215-2 0 0
+
+bash scripts/eval_policy.sh us_force_position_dp ultrasound_force_position 0215-6 0 0
+
+**0216**
+
+今天
+    1.训练一个走delta的model
+    2. 严格inference和采数据时的时间控制。可以把周期定为0.2秒
+    这个inference好像不太好办呀，需要跟控制器配合，但是控制器又不是跟速度相关的
+
+训了两个，一个是5， 10， 一个是1，2，都是delta的，看看效果吧
+但是这个2的曲线有一点过于陡峭了，不知道为什么
+
+跑真机实验：打开控制器后，
+bash scripts/run_force.sh us_force_position_dp ultrasound_force_position 0216-3 0 0
+
+好像这个position还可以哈
+
+不知道这两种是不是可以作为一个对比实验呢？
+
+现在训了一个图像的和一个力的，明天来看看效果
+图像的忘了改名字了,N=15,T=3
+ultrasound_dp ultrasound_scan 0213-5 0 0
+力的是
+us_force_position_dp ultrasound_force_position 0216-4 0 0
+
+**0217**
+可以预测，等会儿打开效果吧
+图像的改成N=15,T=5看看。 0217-2
+bash scripts/train_policy.sh ultrasound_dp ultrasound_scan 0217-2 0 0
+
+整理一下扫脖子的数据然后训一个吧
+训练挂上了，0217-3
+15 4
+
+2.22
+文章除了实验部分都ready
+有force，image的实验
+
+ablation
+safety, comfortable,人填写问卷
+和一般bc方法
+
+和hardcode比
+
+现在policy ros runner里面进行的是arm的测试
+
+今天挂了一个20 3的，0218-1明天开一下服务器！之后万一训很多
+
+**0218**
+4Ss4JOM3JR3m
+
+服务器
+
+ssh -p 14822 crq@166.111.72.148 
+
+**0220**
+先用force来进行确认，把输入输出的频率固定到10hz
+
+inference_force 使用了一些trik，让输出的desired叠加
+
+接下来要做的事情：
+    1. 测试一下扫脖子和扫手臂的能否work
+    2. 重新处理数据
+    3. 配置一下服务器

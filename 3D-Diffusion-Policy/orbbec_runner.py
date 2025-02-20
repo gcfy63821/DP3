@@ -380,7 +380,10 @@ class PolicyROSRunner:
                 #     continue
 
                 with torch.no_grad():
+                    time_1 = time.time()
                     action_dict = self.policy.predict_action(obs_dict)
+                    time_2 = time.time()
+                    print('inference time:', time_2-time_1)
                     # print('action_dict:', action_dict)
                     action_output = action_dict["action"].cpu().numpy().flatten()
                     # print('action_output:', action_output.shape)

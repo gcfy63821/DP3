@@ -38,6 +38,7 @@ from scipy.spatial.transform import Rotation as R
 import sensor_msgs.point_cloud2 as pc2
 from sensor_msgs.msg import PointCloud2
 import pytorch3d.ops as torch3d_ops
+from diffusion_policy_3d.utils.utils_pointcloud import *
 
 
 from sensor_msgs.msg import Image
@@ -162,7 +163,7 @@ def farthest_point_sampling(points, K, use_cuda=False):
     sampled_points = sampled_points.cpu().numpy()
     return sampled_points, indices.cpu().numpy()
 
-def preprocess_point_cloud(points, num_points=1024, use_cuda=False):
+def preprocess_point_cloud(points, num_points=128, use_cuda=False):
 
 
     WORK_SPACE = [
@@ -202,7 +203,7 @@ class PolicyROSRunner:
     def __init__(self, cfg: OmegaConf, output_dir=None):
         self.cfg = copy.deepcopy(cfg)
         self.device = torch.device(self.cfg.training.device)
-        self.output_dir = 'data/outputs/ultrasound_pc-us_pc_dp-0213-4_seed0'
+        self.output_dir = 'data/outputs/ultrasound_pc-us_pc_dp-0214-1_seed0'
 
         # 初始化 ROS 节点
         rospy.init_node('ultrasound_policy_runner', anonymous=True)
@@ -238,6 +239,12 @@ class PolicyROSRunner:
         if cfg.training.use_ema:
             self.ema_model.set_normalizer(normalizer)
 
+        # device transfer
+        device = torch.device(cfg.training.device)
+        self.model.to(device)
+        if self.ema_model is not None:
+            self.ema_model.to(device)
+
 
 
         #################################
@@ -262,7 +269,7 @@ class PolicyROSRunner:
         self.ft_compensated_data = []
         self.agent_pos_data = []
         self.img_data = []
-        self.pointcloud_data = deque(maxlen=5)
+        self.pointcloud_data = []
         self.initial_position = None
         self.initial_rpy = None
         
@@ -328,7 +335,8 @@ class PolicyROSRunner:
     
     def pc_callback(self, msg):
         cloud_points = list(pc2.read_points(msg, skip_nans=True, field_names=("x", "y", "z")))
-        self.pointcloud_data.append((rospy.get_time(), np.array(cloud_points)))
+        cloudpoints = np.array(cloud_points).copy()
+        self.pointcloud_data.append((rospy.get_time(), cloudpoints))
         
 
     def preproces_image(self, image):
@@ -374,6 +382,7 @@ class PolicyROSRunner:
                 agent_pos, agent_pos_timestamp = synced_agent_pos
                 frame , img_timestamp = synced_img
                 point_cloud, timestamp = synced_pointcloud
+                
                 
                 # position, orientation = get_franka_fk_solution(agent_pos)
                 position, orientation = self.get_panda_EE_transform()
@@ -421,8 +430,11 @@ class PolicyROSRunner:
                 state = np.concatenate([position_to_initial, rpy_to_initial, position, euler, velocity, w], axis=-1)
                 force = ft
                 st = rospy.get_time()
+                # point_cloud = preprocess_point_cloud(point_cloud, use_cuda=True)
+                point_cloud = point_cloud_sampling(point_cloud, num_points=128, method="fps")
+
                 print('process_pointcloud_time: ', rospy.get_time() - st)
-                point_cloud = preprocess_point_cloud(point_cloud, use_cuda=True)
+                print('shape:', point_cloud.shape)
 
                 obs_image = self.preproces_image(frame)
                 
@@ -441,11 +453,17 @@ class PolicyROSRunner:
                 pointcloud_array = np.array(list(self.pointcloud_queue))
 
                 # 将 numpy.ndarray 转换为 torch.Tensor
-                state_tensor = torch.tensor(state_array, dtype=torch.float32, requires_grad=False).unsqueeze(0).to(self.device)
-                force_tensor = torch.tensor(force_array, dtype=torch.float32, requires_grad=False).unsqueeze(0).to(self.device)
-                img_tensor = torch.tensor(img_array, dtype=torch.float32, requires_grad=False).unsqueeze(0).to(self.device)
-                pointcloud_tensor = torch.tensor(pointcloud_array, dtype=torch.float32, requires_grad=False).unsqueeze(0).to(self.device)
+                # state_tensor = torch.tensor(state_array, dtype=torch.float32, requires_grad=False).unsqueeze(0).to(self.device)
+                # force_tensor = torch.tensor(force_array, dtype=torch.float32, requires_grad=False).unsqueeze(0).to(self.device)
+                # img_tensor = torch.tensor(img_array, dtype=torch.float32, requires_grad=False).unsqueeze(0).to(self.device)
+                # pointcloud_tensor = torch.tensor(pointcloud_array, dtype=torch.float32, requires_grad=False).unsqueeze(0).to(self.device)
                 
+                state_tensor = torch.tensor(state_array, device='cuda', dtype=torch.float32, requires_grad=False).unsqueeze(0)
+                force_tensor = torch.tensor(force_array, device='cuda', dtype=torch.float32, requires_grad=False).unsqueeze(0)
+                img_tensor = torch.tensor(img_array, device='cuda', dtype=torch.float32, requires_grad=False).unsqueeze(0)
+                pointcloud_tensor = torch.tensor(pointcloud_array, device='cuda', dtype=torch.float32, requires_grad=False).unsqueeze(0)
+ 
+
                 # state_tensor = torch.tensor(state, dtype=torch.float32, requires_grad=False).unsqueeze(0).unsqueeze(0).to(self.device)
                 # force_tensor = torch.tensor(force, dtype=torch.float32, requires_grad=False).unsqueeze(0).unsqueeze(0).to(self.device)
                 # img_tensor = torch.tensor(obs_image, dtype=torch.float32, requires_grad=False).unsqueeze(0).unsqueeze(0).to(self.device)

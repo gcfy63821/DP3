@@ -22,8 +22,7 @@ cd 3D-Diffusion-Policy
 export HYDRA_FULL_ERROR=1
 export CUDA_VISIBLE_DEVICES=${gpu_id}
 export LD_LIBRARY_PATH=$CONDA_PREFIX/lib:$LD_LIBRARY_PATH
-# policy_pc_runner
-python edited_runner.py --config-name=${config_name}.yaml \
+python force_position_inference.py --config-name=${config_name}.yaml \
                             task=${task_name} \
                             hydra.run.dir=${run_dir} \
                             training.debug=$DEBUG \

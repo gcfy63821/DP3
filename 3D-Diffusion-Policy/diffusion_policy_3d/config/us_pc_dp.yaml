@@ -119,7 +119,7 @@ training:
   num_epochs: 3000
   gradient_accumulate_every: 1
   use_ema: True
-  rollout_every: 200
+  rollout_every: 50
   checkpoint_every: 20
   val_every: 1
   sample_every: 5
@@ -139,7 +139,7 @@ logging:
 
 
 checkpoint:
-  save_ckpt: False # if True, save checkpoint every checkpoint_every
+  save_ckpt: True # if True, save checkpoint every checkpoint_every
   topk:
     monitor_key: test_mean_score
     mode: max

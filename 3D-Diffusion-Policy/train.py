@@ -301,8 +301,8 @@ class TrainDP3Workspace:
                     del pred_action
                     del mse
 
-            if env_runner is None:
-                step_log['test_mean_score'] = - train_loss
+            # if env_runner is None:# Need TO CHANGE
+            step_log['test_mean_score'] = - train_loss
                 
             # checkpoint
             if (self.epoch % cfg.training.checkpoint_every) == 0 and cfg.checkpoint.save_ckpt:

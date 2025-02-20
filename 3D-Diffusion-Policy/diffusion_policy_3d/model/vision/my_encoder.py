@@ -476,3 +476,123 @@ class USPCEncoder(nn.Module):
     
     def output_shape(self):
         return self.n_output_channels
+    
+
+
+class ForcePositionEncoder(nn.Module):
+    '''
+    mlp for force and joint
+    '''
+    def __init__(
+        self,
+        observation_space: Dict,
+        out_channel = 256,
+        ultrasound_encoder_cfg = None,
+        debug: bool = False,
+    ):
+        super(ForcePositionEncoder, self).__init__()
+
+        self.point_cloud_key = 'point_cloud'
+        self.imagination_shape = None
+        
+        self.n_output_channels = out_channel
+        self.state_output_dim = ultrasound_encoder_cfg.state_output_dim
+        self.force_output_dim = ultrasound_encoder_cfg.force_output_dim
+        self.force_input_dim = observation_space['force']
+        self.state_shape = observation_space['state']
+
+        block_channel = [64, 128]
+        self.debug = debug
+
+        pretrained = ultrasound_encoder_cfg.pretrained
+        use_layernorm = ultrasound_encoder_cfg.use_layernorm
+       
+
+        
+        # MLP for Force Sensor Encoding
+        # self.force_mlp = nn.Sequential(
+        #     create_mlp(self.force_input_dim, out_channel, net_arch, state_mlp_activation_fn),
+        #     nn.Linear(net_arch[-1], self.resnet_output_dim),
+        # )
+        self.force_mlp = nn.Sequential(
+            nn.Linear(self.force_input_dim[0], block_channel[0]),
+            nn.LayerNorm(block_channel[0]) if use_layernorm else nn.Identity(),
+            nn.ReLU(),
+            nn.Linear(block_channel[0], block_channel[1]),
+            nn.LayerNorm(block_channel[1]) if use_layernorm else nn.Identity(),
+            nn.ReLU(),
+            nn.Linear(block_channel[-1], self.force_output_dim),
+        )
+        
+        
+        # MLP for Joint State Encoding
+        # self.joint_mlp = nn.Sequential(
+        #     create_mlp(self.ee_input_dim, out_channel, net_arch, state_mlp_activation_fn),
+        #     nn.Linear(self.ee_input_dim[-1], self.resnet_output_dim),
+        # )
+        self.joint_mlp = nn.Sequential(
+            nn.Linear(self.state_shape[0], block_channel[0]),
+            nn.LayerNorm(block_channel[0]) if use_layernorm else nn.Identity(),
+            nn.ReLU(),
+            nn.Linear(block_channel[0], block_channel[1]),
+            nn.LayerNorm(block_channel[1]) if use_layernorm else nn.Identity(),
+            nn.ReLU(),
+            nn.Linear(block_channel[-1], self.state_output_dim),
+        )
+        
+        # Final Fully Connected Layer
+        self.final_fc = nn.Linear(self.state_output_dim + self.force_output_dim, out_channel)
+        # self.n_output_channels +=  self.state_output_dim + self.force_output_dim
+    
+    # @staticmethod
+    # def create_mlp(input_dim: int, net_arch: List[int], activation_fn: Type[nn.Module]) -> List[nn.Module]:
+    #     layers = []
+    #     for hidden_dim in net_arch:
+    #         layers.append(nn.Linear(input_dim, hidden_dim))
+    #         layers.append(activation_fn())
+    #         input_dim = hidden_dim
+    #     return layers
+
+    def forward(self, observations: Dict[str, torch.Tensor]) -> torch.Tensor:
+
+        # points = observations[self.point_cloud_key]
+        # assert len(points.shape) == 3, cprint(f"point cloud shape: {points.shape}, length should be 3", "red")
+        # if self.use_imagined_robot:
+        #     img_points = observations[self.imagination_key][..., :points.shape[-1]] # align the last dim
+        #     points = torch.concat([points, img_points], dim=1)
+        
+        # points = torch.transpose(points, 1, 2)   # B * 3 * N
+        # points: B * 3 * (N + sum(Ni))
+        # pn_feat = self.extractor(points)    # B * out_channel
+
+        # img = observations['img']  # Shape: [B, C, H, W]   
+        # print('imgshape:',img.shape)     
+        # img_features = self.cnn(img)  # Shape: [B, 512, 1, 1]
+        # img_features = img_features.view(img_features.size(0), -1)  # Shape: [B, 512]
+        # img_features = self.cnn_fc(img_features)  # Shape: [B, resnet_output_dim]
+        
+        force = observations['force']  # Shape: [B, 6]
+        force_features = self.force_mlp(force)  # Shape: [B, resnet_output_dim]
+
+        joint = observations['state']  # Shape: [B, N]
+        joint_features = self.joint_mlp(joint)  # Shape: [B, resnet_output_dim]
+
+        # Concatenate and Process
+        combined_features = torch.cat([ force_features, joint_features], dim=-1)  # Shape: [B, out_channels + resnet_output_dim + force_output_dim + state_output_dim]
+            
+        # output = combined_features
+        output = self.final_fc(combined_features)  # Shape: [B, output_dim]
+
+
+        if self.debug:
+            print(f"[DEBUG] Force input shape: {force.shape}")
+            print(f"[DEBUG] Force features after MLP: {force_features.shape}")
+            print(f"[DEBUG] Joint input shape: {joint.shape}")
+            print(f"[DEBUG] Joint features after MLP: {joint_features.shape}")
+            print(f"[DEBUG] Combined features shape: {combined_features.shape}")
+            print(f"[DEBUG] Final output shape: {output.shape}")
+
+        return output
+    
+    def output_shape(self):
+        return self.n_output_channels

@@ -12,6 +12,7 @@ from os.path import join
 import tf
 import tf2_ros
 from scipy.spatial.transform import Rotation as R
+from cv_bridge import CvBridge, CvBridgeError
 
 
 def quaternion_to_euler(quaternion):
@@ -117,41 +118,41 @@ class DataCollector:
         
         ########################################
         # 设置视频捕获设备，0 是本地摄像头
-        camera_id = 0 # 这个是超声的
-        self.cap = cv2.VideoCapture(camera_id, cv2.CAP_V4L2)
+        # camera_id = 0 # 这个是超声的
+        # self.cap = cv2.VideoCapture(camera_id, cv2.CAP_V4L2)
 
-        if not self.cap.isOpened():
-            print("无法打开摄像头")
-            exit()
+        # if not self.cap.isOpened():
+        #     print("无法打开摄像头")
+        #     exit()
 
-        print(f'cam original width: {self.cap.get(cv2.CAP_PROP_FRAME_WIDTH)}')
-        print(f'cam original height: {self.cap.get(cv2.CAP_PROP_FRAME_HEIGHT)}')
+        # print(f'cam original width: {self.cap.get(cv2.CAP_PROP_FRAME_WIDTH)}')
+        # print(f'cam original height: {self.cap.get(cv2.CAP_PROP_FRAME_HEIGHT)}')
 
-        # Set desired resolution
-        desired_width = 640 # 1024
-        desired_height = 480 # 768
+        # # Set desired resolution
+        # desired_width = 640 # 1024
+        # desired_height = 480 # 768
 
-        # Set the resolution for the input video stream (camera)
-        self.cap.set(cv2.CAP_PROP_FRAME_WIDTH, desired_width)
-        self.cap.set(cv2.CAP_PROP_FRAME_HEIGHT, desired_height)
+        # # Set the resolution for the input video stream (camera)
+        # self.cap.set(cv2.CAP_PROP_FRAME_WIDTH, desired_width)
+        # self.cap.set(cv2.CAP_PROP_FRAME_HEIGHT, desired_height)
 
                 
-        # Verify the resolution settings
-        actual_width = int(self.cap.get(cv2.CAP_PROP_FRAME_WIDTH))
-        actual_height = int(self.cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
-        print(f"Resolution set to: {actual_width}x{actual_height}")
+        # # Verify the resolution settings
+        # actual_width = int(self.cap.get(cv2.CAP_PROP_FRAME_WIDTH))
+        # actual_height = int(self.cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
+        # print(f"Resolution set to: {actual_width}x{actual_height}")
 
 
-        fps = self.cap.get(cv2.CAP_PROP_FPS)  
-        print('fps:',fps)
+        # fps = self.cap.get(cv2.CAP_PROP_FPS)  
+        # print('fps:',fps)
 
         save_dir = self.imwrite_dir
         output_file = os.path.join(save_dir, f'ultrasound_video.avi')  # 使用当前时间命名文件
 
 
         # 设置视频写入器
-        self.fourcc = cv2.VideoWriter_fourcc(*'XVID')  # 使用 XVID 编码
-        self.out = cv2.VideoWriter(output_file, self.fourcc, fps, (actual_width , actual_height))
+        # self.fourcc = cv2.VideoWriter_fourcc(*'XVID')  # 使用 XVID 编码
+        # self.out = cv2.VideoWriter(output_file, self.fourcc, fps, (actual_width , actual_height))
 
         ###########################################
         
@@ -160,11 +161,13 @@ class DataCollector:
         self.netft_data = []
         self.agent_pos_data = []
         # self.ee_pos_data = []
+        self.img_data = []
         
         
         rospy.Subscriber("/ft_sensor/ft_compensated", WrenchStamped, self.ft_comp_callback)
-        rospy.Subscriber("/ft_sensor/netft_data", WrenchStamped, self.netft_callback)
+        # rospy.Subscriber("/ft_sensor/netft_data", WrenchStamped, self.netft_callback)
         rospy.Subscriber("/joint_states", JointState, self.agent_pos_callback)
+        # rospy.Subscriber("/rgb/image_raw", Image, self.img_callback)
         
         # 发布图像到 ROS 话题
         # self.pub_image = rospy.Publisher("/camera/rgb/image_raw", Image, queue_size=10)
@@ -174,9 +177,9 @@ class DataCollector:
         # 计数器和同步机制
         self.count = 0
         self.rate = rospy.Rate(100)  # 采集频率
-        cv2.namedWindow("Video Stream")
-        self.running = True
-        cv2.setMouseCallback("Video Stream", self.on_mouse_click)
+        # cv2.namedWindow("Video Stream")
+        # self.running = True
+        # cv2.setMouseCallback("Video Stream", self.on_mouse_click)
 
 
     def on_mouse_click(self, event, x, y, flags, param):
@@ -215,6 +218,30 @@ class DataCollector:
         ])
         self.netft_data.append((msg.header.stamp.to_sec(), netft))  # 使用 ROS 时间戳
 
+    def img_callback(self, msg):
+        try:
+            # # 打印图像编码类型
+            # rospy.loginfo(f"Image encoding: {msg.encoding}")
+
+            # # 根据图像编码类型转换图像
+            # if msg.encoding == "bgr8":
+            #     img = self.bridge.imgmsg_to_cv2(msg, "bgr8")
+            # elif msg.encoding == "rgb8":
+            #     img = self.bridge.imgmsg_to_cv2(msg, "rgb8")
+            # elif msg.encoding == "mono8":
+            #     img = self.bridge.imgmsg_to_cv2(msg, "mono8")
+            # elif msg.encoding == "bgra8":
+            #     img = self.bridge.imgmsg_to_cv2(msg, "bgra8")
+            #     # 转换为 BGR 图像
+            #     img = cv2.cvtColor(img, cv2.COLOR_BGRA2BGR)
+            # else:
+            #     rospy.logwarn(f"Unsupported image encoding: {msg.encoding}")
+            #     return
+            img = self.bridge.imgmsg_to_cv2(msg, desired_encoding='passthrough')
+
+            self.img_data.append((rospy.get_time(), img))  # 保存时间戳和图像数据
+        except CvBridgeError as e:
+            rospy.logerr(f"Failed to convert image: {e}")
 
     def agent_pos_callback(self, msg):
         # 处理机械臂末端位置和关节数据
@@ -225,68 +252,60 @@ class DataCollector:
         print('=> Data collection started')
         
         while not rospy.is_shutdown():
-            # 从相机读取图像
-            ret, frame = self.cap.read()
-            if ret:
-                # 显示视频流
-                cv2.imshow("Video Stream", frame)
-                if cv2.waitKey(1) & 0xFF == ord('q'):
-                    break
-                if self.running == False:
-                    break
+            
+
+            current_time = rospy.get_time()
+
+            # 获取当前时间戳，查找与此时间戳最接近的数据（同步）
+            synced_ft_compensated = self.get_closest_data(self.ft_compensated_data, current_time)
+            synced_agent_pos = self.get_closest_data(self.agent_pos_data, current_time)
+            # synced_img = self.get_closest_data(self.img_data, current_time) 
+            
+
+            # 创建字典存储图像和对应的数据
+            data_dict = {}
+
+            # 发布图像到 ROS 话题
+            # ros_image = self.bridge.cv2_to_imgmsg(frame, "bgr8")
+            # ros_image.header.stamp = rospy.Time.now()  # 设置时间戳
+            # self.pub_image.publish(ros_image)  # 发布图像消息
+
+            # 将同步的图像和数据存储到字典
+            if synced_ft_compensated and synced_agent_pos:
+                ft, ft_timestamp = synced_ft_compensated
+                agent_pos, agent_pos_timestamp = synced_agent_pos
+                # frame, img_timestamp = synced_img
+                position, orientation = self.get_panda_EE_transform()
+                if position is None or orientation is None:
+                    continue
+                euler = quaternion_to_euler(orientation)
                 
-                # 将帧写入到视频文件
-                self.out.write(frame)
+                # 将图像数据转为字典存储
+                # data_dict['image'] = frame  # 图像数据是 OpenCV 格式的 NumPy 数组
+                data_dict['ft_compensated'] = ft 
+                data_dict['agent_pos'] = agent_pos  # 机械臂关节数据
+                data_dict['position'] = position # cartesian 
+                data_dict['orientation'] = orientation
+                data_dict['timestamp'] = current_time  # 当前时间戳
+                data_dict['euler'] = euler # RPY
 
-                current_time = rospy.get_time()
+                # 保存字典数据到文件
+                data_filename = join(self.imwrite_dir, f'{self.date2}_{self.count:03d}_data.npy')
+                np.save(data_filename, data_dict)  # 保存字典为 .npy 文件
 
-                # 获取当前时间戳，查找与此时间戳最接近的数据（同步）
-                synced_ft_compensated = self.get_closest_data(self.ft_compensated_data, current_time)
-                # synced_netft = self.get_closest_data(self.netft_data, current_time)
-                synced_agent_pos = self.get_closest_data(self.agent_pos_data, current_time)
-                
-
-                # 创建字典存储图像和对应的数据
-                data_dict = {}
-
-                # 发布图像到 ROS 话题
-                # ros_image = self.bridge.cv2_to_imgmsg(frame, "bgr8")
-                # ros_image.header.stamp = rospy.Time.now()  # 设置时间戳
-                # self.pub_image.publish(ros_image)  # 发布图像消息
-
-                # 将同步的图像和数据存储到字典
-                if synced_ft_compensated and synced_agent_pos:
-                    ft, ft_timestamp = synced_ft_compensated
-                    # netft, netft_timestamp = synced_netft
-                    agent_pos, agent_pos_timestamp = synced_agent_pos
-                    position, orientation = self.get_panda_EE_transform()
-                    if position is None or orientation is None:
-                        continue
-                    euler = quaternion_to_euler(orientation)
-                    
-                    # 将图像数据转为字典存储
-                    data_dict['image'] = frame  # 图像数据是 OpenCV 格式的 NumPy 数组
-                    data_dict['ft_compensated'] = ft 
-                    # data_dict['netft'] = netft
-                    data_dict['agent_pos'] = agent_pos  # 机械臂关节数据
-                    data_dict['position'] = position # cartesian 
-                    data_dict['orientation'] = orientation
-                    data_dict['timestamp'] = current_time  # 当前时间戳
-                    data_dict['euler'] = euler # RPY
-
-                    # 保存字典数据到文件
-                    data_filename = join(self.imwrite_dir, f'{self.date2}_{self.count:03d}_data.npy')
-                    np.save(data_filename, data_dict)  # 保存字典为 .npy 文件
-
-                    print(f"Saved data {data_filename}")
-                
+                print(f"Saved data {data_filename}")
+            
 
                 self.count += 1  # 增加计数器
-            # self.rate.sleep() 
+            else:
+                if not synced_ft_compensated:
+                    print("No synced FT data")
+                if not synced_agent_pos:
+                    print("No synced agent position data")
+                # if not synced_img:
+                #     print("No synced image data")
+
             self.rate.sleep()  # 控制采集频率
-        self.cap.release()
-        self.out.release()
-        cv2.destroyAllWindows()
 
     def get_closest_data(self, data_list, timestamp):
         # 获取与当前时间戳最接近的数据

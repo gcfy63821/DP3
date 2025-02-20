@@ -15,6 +15,10 @@ def preproces_image(image):
     image = image.astype(np.float32)
     image = torch.from_numpy(image).cuda()
     image = image.permute(2, 0, 1) # HxWx4 -> 4xHxW
+    # 如果图像是 bgra8 格式，删除透明通道
+    if image.shape[0] == 4:
+        image = image[:3, :, :] # 只保留 BGR 通道
+    
     image = torchvision.transforms.functional.resize(image, (img_size, img_size))
     image = image.permute(1, 2, 0) # 4xHxW -> HxWx4
     image = image.cpu().numpy()
@@ -48,10 +52,13 @@ def extract_timestamp(file_path):
 # 输入路径（包含.npy文件）
 # expert_data_path = '/home/robotics/crq/3D-Diffusion-Policy/3D-Diffusion-Policy/data/record_data/20250120'
 # save_data_path = '/home/robotics/crq/3D-Diffusion-Policy/3D-Diffusion-Policy/data/ultrasound_data.zarr'
-expert_data_path = '/media/robotics/ST_16T/crq/data/record_data/20250220'
-save_data_path = '/home/robotics/crq/3D-Diffusion-Policy/3D-Diffusion-Policy/data/ultrasound_data_neck.zarr'
-N = 10  # 采样间隔
+expert_data_path = '/media/robotics/ST_16T/crq/data/record_data/force_position'
+save_data_path = '/home/robotics/crq/3D-Diffusion-Policy/3D-Diffusion-Policy/data/ultrasound_data_force_position.zarr'
+# save_data_path = '/home/robotics/crq/3D-Diffusion-Policy/3D-Diffusion-Policy/data/eval_data.zarr'
+
+N = 15  # 采样间隔
 T = 3
+
 # 获取目录下所有子文件夹
 subfolders = [os.path.join(expert_data_path, f) for f in os.listdir(expert_data_path) if os.path.isdir(os.path.join(expert_data_path, f))]
 subfolders = sorted(subfolders)
@@ -85,6 +92,7 @@ for subfolder in subfolders:
     # 遍历子文件夹里的 .npy 文件
     npy_files = [os.path.join(subfolder, f) for f in os.listdir(subfolder) if f.endswith('.npy')]
     print(len(npy_files))
+    # npy_files = sorted(npy_files)  # 确保文件按时间顺序排列
     npy_files = sorted(npy_files, key=extract_timestamp)  # 确保文件按时间顺序排列
 
 
@@ -95,14 +103,11 @@ for subfolder in subfolders:
         prev_position = None
         prev_state = None
         prev_rpy = None
-        prev_timestamp = None
         for k, npy_file in enumerate(npy_files):
-            # if (k + sample) % N != 0:
-            #     continue  # 每隔 N 个文件选择 1 个
+            if (k + sample) % N != 0:
+                continue  # 每隔 N 个文件选择 1 个
 
-            if current_count==0:
-                if k < sample:
-                    continue
+            cprint(f'Processing {npy_file}', 'green')
             
             # 加载 .npy 文件
             data_dict = np.load(npy_file, allow_pickle=True).item()
@@ -110,18 +115,12 @@ for subfolder in subfolders:
             if current_count == 0:
                 initial_position = copy.deepcopy(data_dict['position'])
                 initial_rpy = copy.deepcopy(data_dict['euler'])
+            total_count += 1
+            current_count += 1
 
             current_position = data_dict['position']
             current_rpy = data_dict['euler']
             timestamp = data_dict['timestamp']
-
-            if prev_timestamp is not None:
-                if timestamp - prev_timestamp < 0.1:
-                    continue
-            
-            cprint(f'Processing {npy_file}', 'green')
-            total_count += 1
-            current_count += 1
 
             position_to_initial = current_position - initial_position
             rpy_to_initial = current_rpy - initial_rpy
@@ -143,20 +142,21 @@ for subfolder in subfolders:
             prev_rpy = copy.deepcopy(current_rpy)
             prev_timestamp = copy.deepcopy(timestamp)
 
-
-
-            obs_image = data_dict['image']
-            obs_image = preproces_image(obs_image)
-            # force = np.concatenate([data_dict['ft_compensated'], data_dict['netft']], axis=-1)
+            # obs_image = data_dict['image']
+            # obs_image = preproces_image(obs_image)
             force = data_dict['ft_compensated']
-            # robot_state = np.concatenate([initial_position, initial_orientation, delta_position, delta_orientation], axis=-1)
-            # robot_state = np.concatenate([position_to_initial, rpy_to_initial, delta_position, delta_rpy], axis=-1)
             robot_state = np.concatenate([position_to_initial, rpy_to_initial, current_position, current_rpy, velocity, w], axis=-1)
+            # robot_state = np.concatenate([current_position, current_rpy, velocity, w], axis=-1)
             
             timestamp = data_dict['timestamp']  # 记录时间戳
+            # action_state = np.concatenate([current_position, current_rpy, data_dict['ft_compensated']], axis=-1)
             action_state = np.concatenate([delta_position, delta_rpy, force], axis=-1)
+            delta_position_length = np.linalg.norm(delta_position)
+            force_magnitude = np.linalg.norm(force)
+            print('delta_position_lenth:',delta_position_length, 'force:', force_magnitude)
         
-            img_arrays.append(obs_image)
+        
+            # img_arrays.append(obs_image)
             force_arrays.append(force)
             state_arrays.append(robot_state)
             timestamp_arrays.append(timestamp)
@@ -169,19 +169,17 @@ for subfolder in subfolders:
             action_arrays.append(action_state)
         
 
-        
-
 # 创建 zarr 文件
 zarr_root = zarr.group(save_data_path)
 zarr_data = zarr_root.create_group('data')
 zarr_meta = zarr_root.create_group('meta')
 
 # 将数据堆叠到数组中
-img_arrays = np.stack(img_arrays, axis=0)
+# img_arrays = np.stack(img_arrays, axis=0)
 # if img_arrays.shape[1] == 3:  # make channel last
 #     img_arrays = np.transpose(img_arrays, (0, 2, 3, 1))
 # 假设 img 是形状为 [256, 84, 84, 3] 的张量
-img_arrays = np.transpose(img_arrays, (0, 3, 1, 2))
+# img_arrays = np.transpose(img_arrays, (0, 3, 1, 2))
 
 action_arrays = np.stack(action_arrays, axis=0)
 state_arrays = np.stack(state_arrays, axis=0)
@@ -190,7 +188,7 @@ timestamp_arrays = np.array(timestamp_arrays)
 episode_ends_arrays = np.array(episode_ends_arrays)
 
 compressor = zarr.Blosc(cname='zstd', clevel=3, shuffle=1)
-img_chunk_size = (100, img_arrays.shape[1], img_arrays.shape[2], img_arrays.shape[3])
+# img_chunk_size = (100, img_arrays.shape[1], img_arrays.shape[2], img_arrays.shape[3])
 
 if len(action_arrays.shape) == 2:
     action_chunk_size = (100, action_arrays.shape[1])
@@ -200,7 +198,7 @@ else:
     action_chunk_size = (100,)
 
 # 将数据写入 zarr 文件
-zarr_data.create_dataset('img', data=img_arrays, chunks=img_chunk_size, dtype='uint8', overwrite=True, compressor=compressor)
+# zarr_data.create_dataset('img', data=img_arrays, chunks=img_chunk_size, dtype='uint8', overwrite=True, compressor=compressor)
 zarr_data.create_dataset('action', data=action_arrays, chunks=action_chunk_size, dtype='float32', overwrite=True, compressor=compressor)
 zarr_data.create_dataset('state', data=state_arrays, chunks=(100, state_arrays.shape[1]), dtype='float32', overwrite=True, compressor=compressor)
 zarr_data.create_dataset('force', data=force_arrays, chunks=(100, force_arrays.shape[1]), dtype='float32', overwrite=True, compressor=compressor)
@@ -208,7 +206,7 @@ zarr_data.create_dataset('timestamp', data=timestamp_arrays, chunks=(100,), dtyp
 zarr_meta.create_dataset('episode_ends', data=episode_ends_arrays, chunks=(100,), dtype='int64', overwrite=True, compressor=compressor)
 
 # 打印输出
-cprint(f'img shape: {img_arrays.shape}, range: [{np.min(img_arrays)}, {np.max(img_arrays)}]', 'green')
+# cprint(f'img shape: {img_arrays.shape}, range: [{np.min(img_arrays)}, {np.max(img_arrays)}]', 'green')
 cprint(f'action shape: {action_arrays.shape}, range: [{np.min(action_arrays)}, {np.max(action_arrays)}]', 'green')
 cprint(f'state shape: {state_arrays.shape}, range: [{np.min(state_arrays)}, {np.max(state_arrays)}]', 'green')
 cprint(f'force shape: {force_arrays.shape}, range: [{np.min(force_arrays)}, {np.max(force_arrays)}]', 'green')

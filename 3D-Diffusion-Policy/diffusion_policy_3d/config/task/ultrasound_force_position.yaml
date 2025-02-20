@@ -1,18 +1,11 @@
-name: ultrasound_pc
+name: ultrasound_force_position
 
-task_name: pc
+task_name: force_position
 
 image_shape: &image_shape [3, 84, 84]
 shape_meta: &shape_meta
   # acceptable types: rgb, low_dim
   obs:
-    point_cloud:
-        # shape: [1024, 3]
-        shape: [128, 3]
-        type: point_cloud
-    img:
-        shape: *image_shape
-        type: rgb
     state:
       shape: [18]
       type: low_dim
@@ -30,8 +23,8 @@ env_runner:
   n_action_steps: ${n_action_steps}
 
 dataset:
-  _target_: diffusion_policy_3d.dataset.ultrasound_dataset.UltrasoundPCDataset
-  zarr_path: data/ultrasound_data_pc.zarr
+  _target_: diffusion_policy_3d.dataset.ultrasound_dataset.UltrasoundForcePositionDataset
+  zarr_path: data/ultrasound_data_force_position.zarr
   horizon: ${horizon}
   pad_before: ${eval:'${n_obs_steps}-1'}
   pad_after: ${eval:'${n_action_steps}-1'}
