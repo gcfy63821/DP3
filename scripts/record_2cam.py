@@ -151,7 +151,7 @@ class DataCollector:
         
         ########################################
         # 设置视频捕获设备，0 是本地摄像头
-        camera_id = 0 # 这个是超声的
+        camera_id = 2 # 这个是超声的
         self.cap = cv2.VideoCapture(camera_id, cv2.CAP_V4L2)
 
 

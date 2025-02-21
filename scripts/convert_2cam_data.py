@@ -70,7 +70,7 @@ def extract_timestamp(file_path):
 # 输入路径（包含.npy文件）
 # expert_data_path = '/home/robotics/crq/3D-Diffusion-Policy/3D-Diffusion-Policy/data/record_data/20250120'
 # save_data_path = '/home/robotics/crq/3D-Diffusion-Policy/3D-Diffusion-Policy/data/ultrasound_data.zarr'
-expert_data_path = '/media/robotics/ST_16T/crq/data/record_data/2cam'
+expert_data_path = '/media/robotics/ST_16T/crq/data/record_data/new_neck'
 save_data_path = '/home/robotics/crq/3D-Diffusion-Policy/3D-Diffusion-Policy/data/ultrasound_data_2cam.zarr'
 N = 10  # 采样间隔
 T = 3
@@ -137,6 +137,7 @@ for subfolder in subfolders:
             current_position = data_dict['position']
             current_rpy = data_dict['euler']
             timestamp = data_dict['timestamp']
+            current_orientation = data_dict['orientation']
 
             if prev_timestamp is not None:
                 if timestamp - prev_timestamp < 0.1:
@@ -176,11 +177,14 @@ for subfolder in subfolders:
             force = data_dict['ft_compensated']
             # robot_state = np.concatenate([initial_position, initial_orientation, delta_position, delta_orientation], axis=-1)
             # robot_state = np.concatenate([position_to_initial, rpy_to_initial, delta_position, delta_rpy], axis=-1)
-            robot_state = np.concatenate([position_to_initial, rpy_to_initial, current_position, current_rpy, velocity, w], axis=-1)
+            # robot_state = np.concatenate([position_to_initial, rpy_to_initial, current_position, current_rpy, velocity, w], axis=-1)
             
             timestamp = data_dict['timestamp']  # 记录时间戳
-            action_state = np.concatenate([delta_position, delta_rpy, force], axis=-1)
-        
+            # action_state = np.concatenate([delta_position, delta_rpy, force], axis=-1)
+            robot_state = np.concatenate([current_position, current_orientation, velocity, position_to_initial], axis=-1) # 3+4+3+3=13
+            action_state = np.concatenate([delta_position, current_position, current_orientation, force], axis=-1) # 7 + 6 = 13
+
+
             img_arrays.append(us_image)
             img2_arrays.append(realsense_image)
             force_arrays.append(force)

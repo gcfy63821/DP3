@@ -56,7 +56,7 @@ def extract_timestamp(file_path):
 # save_data_path = '/home/robotics/crq/3D-Diffusion-Policy/3D-Diffusion-Policy/data/ultrasound_data.zarr'
 expert_data_path = '/media/robotics/ST_16T/crq/data/record_data/20250220'
 save_data_path = '/home/robotics/crq/3D-Diffusion-Policy/3D-Diffusion-Policy/data/ultrasound_data_neck.zarr'
-N = 10  # 采样间隔
+N = 5  # 采样间隔
 T = 3
 # 获取目录下所有子文件夹
 subfolders = [os.path.join(expert_data_path, f) for f in os.listdir(expert_data_path) if os.path.isdir(os.path.join(expert_data_path, f))]
@@ -116,9 +116,11 @@ for subfolder in subfolders:
             if current_count == 0:
                 initial_position = copy.deepcopy(data_dict['position'])
                 initial_rpy = copy.deepcopy(data_dict['euler'])
+                initial_orientation = copy.deepcopy(data_dict['orientation'])
 
             current_position = data_dict['position']
             current_rpy = data_dict['euler']
+            current_orientation = data_dict['orientation']
             timestamp = data_dict['timestamp']
 
             if prev_timestamp is not None:
@@ -157,10 +159,14 @@ for subfolder in subfolders:
             force = data_dict['ft_compensated']
             # robot_state = np.concatenate([initial_position, initial_orientation, delta_position, delta_orientation], axis=-1)
             # robot_state = np.concatenate([position_to_initial, rpy_to_initial, delta_position, delta_rpy], axis=-1)
-            robot_state = np.concatenate([position_to_initial, rpy_to_initial, current_position, current_rpy, velocity, w], axis=-1)
+            # robot_state = np.concatenate([position_to_initial, rpy_to_initial, current_position, current_rpy, velocity, w], axis=-1)
             
+            
+            # action_state = np.concatenate([delta_position, delta_rpy, force], axis=-1)
+            robot_state = np.concatenate([current_position, current_orientation, velocity, position_to_initial], axis=-1) # 3+4+3+3=13
+            action_state = np.concatenate([delta_position, current_position, current_orientation, force], axis=-1) # 7 + 6 = 13
+
             timestamp = data_dict['timestamp']  # 记录时间戳
-            action_state = np.concatenate([delta_position, delta_rpy, force], axis=-1)
         
             img_arrays.append(obs_image)
             force_arrays.append(force)

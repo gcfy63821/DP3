@@ -268,3 +268,14 @@ bash scripts/run_video.sh ultrasound_dp ultrasound_scan - 0 0
 realsense-viewer
 
 open_realsense.py 可以打开realsense相机
+
+
+ bash scripts/run_2cam.sh ultrasound_dp_2cam ultrasound_2cam_scan - 0 0
+
+ bash scripts/eval_policy.sh  ultrasound_dp_2cam ultrasound_2cam_scan 0221-1 0 0 
+
+ bash scripts/train_policy.sh ultrasound_dp_2cam ultrasound_2cam_scan 0221-1 0 0 
+
+
+
+ 用欧拉角表示不够稳定，目前都换成了四元数

@@ -35,121 +35,17 @@ from collections import deque
 from torch.utils.data import DataLoader
 import time
 from scipy.spatial.transform import Rotation as R
+import pyrealsense2 as rs
 
 OmegaConf.register_new_resolver("eval", eval, replace=True)
  
-
-def get_tf_mat(i, dh):
-    """Calculate the transformation matrix for the given joint based on DH parameters."""
-    a = dh[i][0]
-    d = dh[i][1]
-    alpha = dh[i][2]
-    theta = dh[i][3]
-    
-    # Transformation matrix based on DH parameters
-    return np.array([[np.cos(theta), -np.sin(theta) * np.cos(alpha), np.sin(theta) * np.sin(alpha), a * np.cos(theta)],
-                     [np.sin(theta), np.cos(theta) * np.cos(alpha), -np.cos(theta) * np.sin(alpha), a * np.sin(theta)],
-                     [0, np.sin(alpha), np.cos(alpha), d],
-                     [0, 0, 0, 1]])
-
-def get_franka_fk_solution(joint_angles):
-    """Calculate the forward kinematics solution and return the end-effector position (xyz) and orientation (rotation matrix or quaternion)."""
-    
-    # Define the DH parameters for the 7 DOF robotic arm (example for a robot like Panda)
-    dh_params = [
-        [0, 0.333, 0, joint_angles[0]],
-        [0, 0, -np.pi/2, joint_angles[1]],
-        [0, 0.316, np.pi/2, joint_angles[2]],
-        [0.0825, 0, np.pi/2, joint_angles[3]],
-        [-0.0825, 0.384, -np.pi/2, joint_angles[4]],
-        [0, 0, np.pi/2, joint_angles[5]],
-        [0.088, 0, np.pi/2, joint_angles[6]],
-        [0, 0.107, 0, 0],  # End-effector (gripper) offset (typically the last transformation)
-        [0, 0, 0, -np.pi/4],  # Some additional offsets if needed
-        [0.0, 0.1034, 0, 0]
-    ]
-
-    # Initialize the transformation matrix as identity matrix
-    T = np.eye(4)
-    
-    # Calculate the transformation matrix for each joint using the DH parameters
-    for i in range(len(dh_params)):
-        T = T @ get_tf_mat(i, dh_params)
-    
-    # Extract the position (xyz) and orientation (rotation matrix)
-    position = T[:3, 3]  # The position is the last column of the transformation matrix
-    rotation_matrix = T[:3, :3]  # The orientation is the top-left 3x3 matrix (rotation part)
-
-    # Convert the rotation matrix to a quaternion (optional, if you need orientation as quaternion)
-    orientation = rotation_matrix_to_quaternion(rotation_matrix)
-    
-    return position, orientation
-
-def rotation_matrix_to_quaternion(R):
-    """Convert a rotation matrix to a quaternion."""
-    trace = np.trace(R)
-    
-    if trace > 0:
-        s = 0.5 / np.sqrt(trace + 1.0)
-        qw = 0.25 / s
-        qx = (R[2, 1] - R[1, 2]) * s
-        qy = (R[0, 2] - R[2, 0]) * s
-        qz = (R[1, 0] - R[0, 1]) * s
-    else:
-        if R[0, 0] > R[1, 1] and R[0, 0] > R[2, 2]:
-            s = 2.0 * np.sqrt(1.0 + R[0, 0] - R[1, 1] - R[2, 2])
-            qw = (R[2, 1] - R[1, 2]) / s
-            qx = 0.25 * s
-            qy = (R[0, 1] + R[1, 0]) / s
-            qz = (R[0, 2] + R[2, 0]) / s
-        elif R[1, 1] > R[2, 2]:
-            s = 2.0 * np.sqrt(1.0 + R[1, 1] - R[0, 0] - R[2, 2])
-            qw = (R[0, 2] - R[2, 0]) / s
-            qx = (R[0, 1] + R[1, 0]) / s
-            qy = 0.25 * s
-            qz = (R[1, 2] + R[2, 1]) / s
-        else:
-            s = 2.0 * np.sqrt(1.0 + R[2, 2] - R[0, 0] - R[1, 1])
-            qw = (R[1, 0] - R[0, 1]) / s
-            qx = (R[0, 2] + R[2, 0]) / s
-            qy = (R[1, 2] + R[2, 1]) / s
-            qz = 0.25 * s
-    
-    return np.array([qw, qx, qy, qz])
-
-def quaternion_multiply(q1, q2):
-    """
-    计算两个四元数的乘积
-    """
-    w1, x1, y1, z1 = q1
-    w2, x2, y2, z2 = q2
-    w = w1 * w2 - x1 * x2 - y1 * y2 - z1 * z2
-    x = w1 * x2 + x1 * w2 + y1 * z2 - z1 * y2
-    y = w1 * y2 - x1 * z2 + y1 * w2 + z1 * x2
-    z = w1 * z2 + x1 * y2 - y1 * x2 + z1 * w2
-    return np.array([w, x, y, z])
-
-def quaternion_inverse(q):
-    """
-    计算四元数的逆
-    """
-    w, x, y, z = q
-    return np.array([w, -x, -y, -z]) / (w**2 + x**2 + y**2 + z**2)
-
-def quarternion_to_euler(q):
-    """
-    Convert quaternion to euler angles
-    """
-    r = R.from_quat(q)
-    return r.as_euler('xyz', degrees=False)
-
 
 
 class PolicyROSRunner:
     def __init__(self, cfg: OmegaConf, output_dir=None):
         self.cfg = copy.deepcopy(cfg)
         self.device = torch.device(self.cfg.training.device)
-        self.output_dir = 'data/outputs/ultrasound_scan-ultrasound_dp-0221-5_seed0'
+        self.output_dir = 'data/outputs/ultrasound_scan-ultrasound_dp-0221-1_seed0'
 
         # 初始化 ROS 节点
         rospy.init_node('ultrasound_policy_runner', anonymous=True)
@@ -224,12 +120,8 @@ class PolicyROSRunner:
         self.prev_timestamp = None
         ########################################
         # 设置视频捕获设备，0 是本地摄像头
-        # camera_id = 0 # 这个是超声的
-        # self.cap = cv2.VideoCapture(camera_id, cv2.CAP_V4L2)
-        # 设置视频捕获设备，读取视频文件
-        video_file_path = '/media/robotics/ST_16T/crq/data/record_data/ultrasound_video.avi'  # 替换为你的视频文件路径
-        self.cap = cv2.VideoCapture(video_file_path)
-
+        camera_id = 0 # 这个是超声的
+        self.cap = cv2.VideoCapture(camera_id, cv2.CAP_V4L2)
 
         if not self.cap.isOpened():
             print("无法打开摄像头")
@@ -248,8 +140,11 @@ class PolicyROSRunner:
         print('Subscribed Topics')
 
         
-        self.rate = rospy.Rate(30) # 10Hz
+        self.rate = rospy.Rate(10) # 10Hz
         self.tf_listener = tf.TransformListener()
+
+        self.pipeline = initialize_realsense()
+
         
     def get_panda_EE_transform(self):
         try:
@@ -279,11 +174,32 @@ class PolicyROSRunner:
         
         return closest_data
     
-    def preproces_image(self, image):
+    def preproces_image1(self, image):
         img_size = 84
+        
+        # 将图像转换为灰度图像
+        image = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY)
+        
+        image = image.astype(np.float32)
+        image = torch.from_numpy(image).cuda()
+        image = image.unsqueeze(0)  # 添加通道维度，变为 1xHxW
+
+        min_x, max_x = 100, 480
+        min_y, max_y = 50, 330
+
+        image = image[:, min_y:max_y, min_x:max_x]
+
+        image = torchvision.transforms.functional.resize(image, (img_size, img_size))
+        image = image.cpu().numpy()
+        return image
+    
+    def preproces_image2(self, image):
+        img_size = 64
+        
         image = image.astype(np.float32)
         image = torch.from_numpy(image).cuda()
         image = image.permute(2, 0, 1) # HxWx4 -> 4xHxW
+
         image = torchvision.transforms.functional.resize(image, (img_size, img_size))
         # image = image.permute(1, 2, 0) # 4xHxW -> HxWx4
         image = image.cpu().numpy()
@@ -299,7 +215,7 @@ class PolicyROSRunner:
         # img = self.preproces_image(img)
         # obs_history = {"point_cloud": point_cloud, "img": img}
 
-        obs_history = {"img": None}
+        obs_history = {"img": None,"img2":None}
 
         position, orientation = self.get_panda_EE_transform()
         if position is None or orientation is None:
@@ -330,8 +246,8 @@ class PolicyROSRunner:
         else:
             velocity = np.zeros(3)
             w = np.zeros(3)
-        state = np.concatenate([position, orientation, velocity, position_to_initial], axis=-1)
-        # state = np.concatenate([position_to_initial, rpy_to_initial, position, euler, velocity, w], axis=-1)
+        
+        state = np.concatenate([position_to_initial, rpy_to_initial, position, euler, velocity, w], axis=-1)
         # state = np.concatenate([position, euler, velocity, w], axis=-1)
         force = self.curr_force.copy()
 
@@ -358,25 +274,34 @@ class PolicyROSRunner:
         
         while not rospy.is_shutdown():
             ret, frame = self.cap.read()
-            if ret:
+            # realsense
+            color_image, depth_image = get_frames(self.pipeline)
+            if ret and color_image is not None:
                 # 显示视频流
                 cv2.imshow("Video Stream", frame)
+                cv2.imshow('Color Image', color_image)
                 if current_time is None:
                     # 避免开始的时候有绿色的帧
                     time.sleep(1)
                 current_time = rospy.get_time()
                 curr_obs = self.obs2dp_obs()
 
-                curr_img = self.preproces_image(frame)
+                curr_img = self.preproces_image1(frame)
+
+                depth_image_normalized = cv2.normalize(depth_image, None, 0, 255, cv2.NORM_MINMAX)
+                depth_image_normalized = depth_image_normalized.astype(np.uint8)
+                combined_image = np.dstack((color_image, depth_image_normalized))
+                    
+                curr_img2 = self.preproces_image2(combined_image)
                 
                 if curr_obs is None or curr_img is None:
                     continue
                 curr_obs["img"] = curr_img
+                curr_obs["img2"] = curr_img2
 
                 if desired_position is None:
-                    desired_position = curr_obs["state"][:3]
-                    # desired_rpy = curr_obs['state'][9:12]
-                    desired_orientation = curr_obs["state"][3:7]
+                    desired_position = curr_obs["state"][6:9]
+                    desired_rpy = curr_obs['state'][9:12]
 
                 
                 if last_obs is None:
@@ -397,14 +322,19 @@ class PolicyROSRunner:
                         np.array(last_obs["img"], dtype=np.float32),
                         np.array(curr_obs["img"], dtype=np.float32),
                     ]
+                    obs_history["img2"] = [
+                        np.array(last_obs["img2"], dtype=np.float32),
+                        np.array(curr_obs["img2"], dtype=np.float32),
+                    ]
 
 
                 prepped_data = {k: torch.tensor(np.array([v]), device="cuda") for k, v in obs_history.items()}
 
                 with torch.no_grad():
-                    # print('start_inference')
+                    print('start_inference')
                     start_time = rospy.get_time()
                     action_dict = self.policy.predict_action(prepped_data)
+                    print('time_cost:', rospy.get_time() - start_time)
                     action_output = action_dict["action"].cpu().numpy().flatten()
                     delta_position = action_output[:3]
                     # delta_rpy = action_output[3:6]
@@ -427,35 +357,23 @@ class PolicyROSRunner:
                     
                     # output_orientation = R.from_euler('xyz', output_rpy).as_quat()
                     output_orientation = action_output[6:10]
+                    # 为了防止不合法，进行归一化
                     output_orientation = output_orientation / np.linalg.norm(output_orientation)
 
-                    delta_position_length = np.linalg.norm(output_position - curr_obs["state"][:3])
+                    delta_position_length = np.linalg.norm(output_position - curr_obs['state'][6:9])
                     force_magnitude = np.linalg.norm(output_wrench)
                     print('delta_position_lenth:',delta_position_length, 'force:', force_magnitude)
                     
                     if delta_position_length < 0.04:
                         self.publish_pose_and_wrench(output_wrench, output_position, output_orientation)
                     else: # back to stable
-                        desired_position = curr_obs["state"][:3]
-                        desired_orientation = curr_obs["state"][3:7]
+                        desired_position = curr_obs["state"][6:9]
+                        desired_rpy = curr_obs['state'][9:12]
 
                     # 发布 TF 变换
                     self.publish_tf(output_position, output_orientation, frame_id="panda_link0", child_id="action_frame")
-       
-                    # print('time_cost:', rospy.get_time() - start_time)
-                    # action_output = action_dict["action"].cpu().numpy().flatten()
-                    # # delta_position = action_output[:3]
-                    # # delta_rpy = action_output[3:6]
-                    # # output_wrench = action_output[6:12]
-                    # # # direct control:
-                    # # # output_position = action_output[:3]
-                    # # # output_rpy = action_output[3:6]
-                    # # # delta control:
-                    # # output_position = delta_position + curr_obs['state'][6:9]
-                    # # output_rpy = delta_rpy + curr_obs['state'][9:12]
-
-                    # # output_orientation = R.from_euler('xyz', output_rpy).as_quat()
-                    # # print(action_output)
+                    
+                    # print(action_output)
                     # for i in range(3):
                     #     try:
                     #         delta_position = action_output[i*12:i*12 +3]
@@ -468,10 +386,8 @@ class PolicyROSRunner:
                     #         # output_position = delta_position + curr_obs['state'][i*12+6:i*12+9]
                     #         # output_rpy = delta_rpy + curr_obs['state'][i*12+9:i*12+12]
                     #         # output_orientation = R.from_euler('xyz', output_rpy).as_quat()
-                            
                     #         desired_position += delta_position
                     #         # desired_rpy += delta_rpy
-                    #         # desired_position = delta_position + curr_obs['state'][6：9]
                     #         desired_rpy = delta_rpy + curr_obs['state'][9:12]
 
                     #         output_position = desired_position
@@ -488,7 +404,7 @@ class PolicyROSRunner:
                     #         delta_position_length = np.linalg.norm(output_position - curr_obs['state'][6:9])
                     #         force_magnitude = np.linalg.norm(output_wrench)
 
-                    #         # print('delta_position_lenth:',delta_position_length, 'force:', force_magnitude)
+                    #         print('delta_position_lenth:',delta_position_length, 'force:', force_magnitude)
                             
                             
                     #         if delta_position_length < 0.04:
@@ -655,6 +571,146 @@ class PolicyROSRunner:
         self.pose_pub.publish(pose_msg)
         # rospy.loginfo(f"Published PoseStamped: {pose_msg}")
         rospy.loginfo_throttle(1, f"Published PoseStamped: {pose_msg}")
+
+
+def initialize_realsense():
+    # 配置 RealSense 流
+    pipeline = rs.pipeline()
+    config = rs.config()
+    
+    # 启用彩色流
+    config.enable_stream(rs.stream.color, 640, 480, rs.format.bgr8, 30)
+    # 启用深度流
+    config.enable_stream(rs.stream.depth, 640, 480, rs.format.z16, 30)
+    
+    # 开始流
+    pipeline.start(config)
+    
+    return pipeline
+
+def get_frames(pipeline):
+    # 等待一帧数据
+    frames = pipeline.wait_for_frames()
+    
+    # 获取彩色帧
+    color_frame = frames.get_color_frame()
+    # 获取深度帧
+    depth_frame = frames.get_depth_frame()
+    
+    if not color_frame or not depth_frame:
+        return None, None
+    
+    # 将图像转换为 NumPy 数组
+    color_image = np.asanyarray(color_frame.get_data())
+    depth_image = np.asanyarray(depth_frame.get_data())
+    
+    return color_image, depth_image
+
+def get_tf_mat(i, dh):
+    """Calculate the transformation matrix for the given joint based on DH parameters."""
+    a = dh[i][0]
+    d = dh[i][1]
+    alpha = dh[i][2]
+    theta = dh[i][3]
+    
+    # Transformation matrix based on DH parameters
+    return np.array([[np.cos(theta), -np.sin(theta) * np.cos(alpha), np.sin(theta) * np.sin(alpha), a * np.cos(theta)],
+                     [np.sin(theta), np.cos(theta) * np.cos(alpha), -np.cos(theta) * np.sin(alpha), a * np.sin(theta)],
+                     [0, np.sin(alpha), np.cos(alpha), d],
+                     [0, 0, 0, 1]])
+
+def get_franka_fk_solution(joint_angles):
+    """Calculate the forward kinematics solution and return the end-effector position (xyz) and orientation (rotation matrix or quaternion)."""
+    
+    # Define the DH parameters for the 7 DOF robotic arm (example for a robot like Panda)
+    dh_params = [
+        [0, 0.333, 0, joint_angles[0]],
+        [0, 0, -np.pi/2, joint_angles[1]],
+        [0, 0.316, np.pi/2, joint_angles[2]],
+        [0.0825, 0, np.pi/2, joint_angles[3]],
+        [-0.0825, 0.384, -np.pi/2, joint_angles[4]],
+        [0, 0, np.pi/2, joint_angles[5]],
+        [0.088, 0, np.pi/2, joint_angles[6]],
+        [0, 0.107, 0, 0],  # End-effector (gripper) offset (typically the last transformation)
+        [0, 0, 0, -np.pi/4],  # Some additional offsets if needed
+        [0.0, 0.1034, 0, 0]
+    ]
+
+    # Initialize the transformation matrix as identity matrix
+    T = np.eye(4)
+    
+    # Calculate the transformation matrix for each joint using the DH parameters
+    for i in range(len(dh_params)):
+        T = T @ get_tf_mat(i, dh_params)
+    
+    # Extract the position (xyz) and orientation (rotation matrix)
+    position = T[:3, 3]  # The position is the last column of the transformation matrix
+    rotation_matrix = T[:3, :3]  # The orientation is the top-left 3x3 matrix (rotation part)
+
+    # Convert the rotation matrix to a quaternion (optional, if you need orientation as quaternion)
+    orientation = rotation_matrix_to_quaternion(rotation_matrix)
+    
+    return position, orientation
+
+def rotation_matrix_to_quaternion(R):
+    """Convert a rotation matrix to a quaternion."""
+    trace = np.trace(R)
+    
+    if trace > 0:
+        s = 0.5 / np.sqrt(trace + 1.0)
+        qw = 0.25 / s
+        qx = (R[2, 1] - R[1, 2]) * s
+        qy = (R[0, 2] - R[2, 0]) * s
+        qz = (R[1, 0] - R[0, 1]) * s
+    else:
+        if R[0, 0] > R[1, 1] and R[0, 0] > R[2, 2]:
+            s = 2.0 * np.sqrt(1.0 + R[0, 0] - R[1, 1] - R[2, 2])
+            qw = (R[2, 1] - R[1, 2]) / s
+            qx = 0.25 * s
+            qy = (R[0, 1] + R[1, 0]) / s
+            qz = (R[0, 2] + R[2, 0]) / s
+        elif R[1, 1] > R[2, 2]:
+            s = 2.0 * np.sqrt(1.0 + R[1, 1] - R[0, 0] - R[2, 2])
+            qw = (R[0, 2] - R[2, 0]) / s
+            qx = (R[0, 1] + R[1, 0]) / s
+            qy = 0.25 * s
+            qz = (R[1, 2] + R[2, 1]) / s
+        else:
+            s = 2.0 * np.sqrt(1.0 + R[2, 2] - R[0, 0] - R[1, 1])
+            qw = (R[1, 0] - R[0, 1]) / s
+            qx = (R[0, 2] + R[2, 0]) / s
+            qy = (R[1, 2] + R[2, 1]) / s
+            qz = 0.25 * s
+    
+    return np.array([qw, qx, qy, qz])
+
+def quaternion_multiply(q1, q2):
+    """
+    计算两个四元数的乘积
+    """
+    w1, x1, y1, z1 = q1
+    w2, x2, y2, z2 = q2
+    w = w1 * w2 - x1 * x2 - y1 * y2 - z1 * z2
+    x = w1 * x2 + x1 * w2 + y1 * z2 - z1 * y2
+    y = w1 * y2 - x1 * z2 + y1 * w2 + z1 * x2
+    z = w1 * z2 + x1 * y2 - y1 * x2 + z1 * w2
+    return np.array([w, x, y, z])
+
+def quaternion_inverse(q):
+    """
+    计算四元数的逆
+    """
+    w, x, y, z = q
+    return np.array([w, -x, -y, -z]) / (w**2 + x**2 + y**2 + z**2)
+
+def quarternion_to_euler(q):
+    """
+    Convert quaternion to euler angles
+    """
+    r = R.from_quat(q)
+    return r.as_euler('xyz', degrees=False)
+
+
 
 
 @hydra.main(

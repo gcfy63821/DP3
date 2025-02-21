@@ -149,7 +149,7 @@ class PolicyROSRunner:
     def __init__(self, cfg: OmegaConf, output_dir=None):
         self.cfg = copy.deepcopy(cfg)
         self.device = torch.device(self.cfg.training.device)
-        self.output_dir = 'data/outputs/ultrasound_scan-ultrasound_dp-0217-2_seed0'
+        self.output_dir = 'data/outputs/ultrasound_scan-ultrasound_dp-0221-5_seed0'
 
         # 初始化 ROS 节点
         rospy.init_node('ultrasound_policy_runner', anonymous=True)
@@ -224,8 +224,11 @@ class PolicyROSRunner:
         self.prev_timestamp = None
         ########################################
         # 设置视频捕获设备，0 是本地摄像头
-        camera_id = 0 # 这个是超声的
-        self.cap = cv2.VideoCapture(camera_id, cv2.CAP_V4L2)
+        # camera_id = 0 # 这个是超声的
+        # self.cap = cv2.VideoCapture(camera_id, cv2.CAP_V4L2)
+        video_file_path = '/media/robotics/ST_16T/crq/data/record_data/ultrasound_video.avi'  # 替换为你的视频文件路径
+        self.cap = cv2.VideoCapture(video_file_path)
+
 
         if not self.cap.isOpened():
             print("无法打开摄像头")
@@ -280,6 +283,11 @@ class PolicyROSRunner:
         image = image.astype(np.float32)
         image = torch.from_numpy(image).cuda()
         image = image.permute(2, 0, 1) # HxWx4 -> 4xHxW
+        min_x, max_x = 100, 480
+        min_y, max_y = 50, 330
+
+        image = image[:, min_y:max_y, min_x:max_x]
+
         image = torchvision.transforms.functional.resize(image, (img_size, img_size))
         # image = image.permute(1, 2, 0) # 4xHxW -> HxWx4
         image = image.cpu().numpy()
@@ -327,7 +335,8 @@ class PolicyROSRunner:
             velocity = np.zeros(3)
             w = np.zeros(3)
         
-        state = np.concatenate([position_to_initial, rpy_to_initial, position, euler, velocity, w], axis=-1)
+        # state = np.concatenate([position_to_initial, rpy_to_initial, position, euler, velocity, w], axis=-1)
+        state = np.concatenate([position, orientation, velocity, position_to_initial], axis=-1)
         # state = np.concatenate([position, euler, velocity, w], axis=-1)
         force = self.curr_force.copy()
 
@@ -370,8 +379,9 @@ class PolicyROSRunner:
                 curr_obs["img"] = curr_img
 
                 if desired_position is None:
-                    desired_position = curr_obs["state"][6:9]
-                    desired_rpy = curr_obs['state'][9:12]
+                    desired_position = curr_obs["state"][:3]
+                    # desired_rpy = curr_obs['state'][9:12]
+                    desired_orientation = curr_obs['state'][3:7]
 
                 
                 if last_obs is None:
@@ -399,9 +409,46 @@ class PolicyROSRunner:
                 with torch.no_grad():
                     print('start_inference')
                     start_time = rospy.get_time()
+                    print(prepped_data['force'].shape)
                     action_dict = self.policy.predict_action(prepped_data)
                     print('time_cost:', rospy.get_time() - start_time)
                     action_output = action_dict["action"].cpu().numpy().flatten()
+                    delta_position = action_output[:3]
+                    # delta_rpy = action_output[3:6]
+                    # output_wrench = action_output[6:12]
+                    output_wrench = action_output[10:16]
+                    # direct control:
+                    # output_position = action_output[:3]
+                    # output_rpy = action_output[3:6]
+                    # delta control:
+                    # output_position = delta_position + curr_obs['state'][6:9]
+                    # output_rpy = delta_rpy + curr_obs['state'][9:12]
+                    
+                    # desired pos:
+                    desired_position += delta_position
+                    # desired_rpy += delta_rpy
+                    # desired_rpy = delta_rpy + curr_obs['state'][9:12]
+
+                    output_position = desired_position
+                    output_rpy = desired_rpy
+                    
+                    # output_orientation = R.from_euler('xyz', output_rpy).as_quat()
+                    output_orientation = action_output[6:10]
+                    output_orientation = output_orientation / np.linalg.norm(output_orientation)
+
+                    delta_position_length = np.linalg.norm(output_position - curr_obs["state"][:3])
+                    force_magnitude = np.linalg.norm(output_wrench)
+                    print('delta_position_lenth:',delta_position_length, 'force:', force_magnitude)
+                    
+                    if delta_position_length < 0.04:
+                        self.publish_pose_and_wrench(output_wrench, output_position, output_orientation)
+                    else: # back to stable
+                        desired_position = curr_obs["state"][:3]
+                        desired_orientation = curr_obs["state"][3:7]
+
+                    # 发布 TF 变换
+                    self.publish_tf(output_position, output_orientation, frame_id="panda_link0", child_id="action_frame")
+       
                     # delta_position = action_output[:3]
                     # delta_rpy = action_output[3:6]
                     # output_wrench = action_output[6:12]
@@ -413,50 +460,50 @@ class PolicyROSRunner:
                     # output_rpy = delta_rpy + curr_obs['state'][9:12]
 
                     # output_orientation = R.from_euler('xyz', output_rpy).as_quat()
-                    print(action_output)
-                    for i in range(3):
-                        try:
-                            delta_position = action_output[i*12:i*12 +3]
-                            delta_rpy = action_output[i*12+3:i*12 +6]
-                            output_wrench = -1 * action_output[i*12+6:i*12+12]
-                            # direct control:
-                            # output_position = action_output[:3]
-                            # output_rpy = action_output[3:6]
-                            # delta control:
-                            # output_position = delta_position + curr_obs['state'][i*12+6:i*12+9]
-                            # output_rpy = delta_rpy + curr_obs['state'][i*12+9:i*12+12]
-                            # output_orientation = R.from_euler('xyz', output_rpy).as_quat()
-                            desired_position += delta_position
-                            # desired_rpy += delta_rpy
-                            desired_rpy = delta_rpy + curr_obs['state'][9:12]
+                    # print(action_output)
+                    # for i in range(3):
+                    #     try:
+                    #         delta_position = action_output[i*12:i*12 +3]
+                    #         delta_rpy = action_output[i*12+3:i*12 +6]
+                    #         output_wrench = -1 * action_output[i*12+6:i*12+12]
+                    #         # direct control:
+                    #         # output_position = action_output[:3]
+                    #         # output_rpy = action_output[3:6]
+                    #         # delta control:
+                    #         # output_position = delta_position + curr_obs['state'][i*12+6:i*12+9]
+                    #         # output_rpy = delta_rpy + curr_obs['state'][i*12+9:i*12+12]
+                    #         # output_orientation = R.from_euler('xyz', output_rpy).as_quat()
+                    #         desired_position += delta_position
+                    #         # desired_rpy += delta_rpy
+                    #         desired_rpy = delta_rpy + curr_obs['state'][9:12]
 
-                            output_position = desired_position
-                            output_rpy = desired_rpy
-                            output_orientation = R.from_euler('xyz', output_rpy).as_quat()
+                    #         output_position = desired_position
+                    #         output_rpy = desired_rpy
+                    #         output_orientation = R.from_euler('xyz', output_rpy).as_quat()
 
                 
-                            # self.publish_pose_and_wrench(output_wrench, output_position, output_orientation)
+                    #         # self.publish_pose_and_wrench(output_wrench, output_position, output_orientation)
                             
-                            # # 发布 TF 变换
-                            # self.publish_tf(output_position, output_orientation, frame_id="panda_link0", child_id="action_frame")
+                    #         # # 发布 TF 变换
+                    #         # self.publish_tf(output_position, output_orientation, frame_id="panda_link0", child_id="action_frame")
                             
                             
-                            delta_position_length = np.linalg.norm(output_position - curr_obs['state'][6:9])
-                            force_magnitude = np.linalg.norm(output_wrench)
+                    #         delta_position_length = np.linalg.norm(output_position - curr_obs['state'][6:9])
+                    #         force_magnitude = np.linalg.norm(output_wrench)
 
-                            print('delta_position_lenth:',delta_position_length, 'force:', force_magnitude)
+                    #         print('delta_position_lenth:',delta_position_length, 'force:', force_magnitude)
                             
                             
-                            if delta_position_length < 0.04:
-                                self.publish_tf(output_position, output_orientation, frame_id="panda_link0", child_id="action_frame")
-                                self.publish_pose_and_wrench(output_wrench, output_position, output_orientation)
-                            else: # back to stable
-                                desired_position = curr_obs["state"][6:9]
-                                desired_rpy = curr_obs['state'][9:12]
-                            self.rate.sleep()
+                    #         if delta_position_length < 0.04:
+                    #             self.publish_tf(output_position, output_orientation, frame_id="panda_link0", child_id="action_frame")
+                    #             self.publish_pose_and_wrench(output_wrench, output_position, output_orientation)
+                    #         else: # back to stable
+                    #             desired_position = curr_obs["state"][6:9]
+                    #             desired_rpy = curr_obs['state'][9:12]
+                    #         self.rate.sleep()
 
-                        except Exception as e:
-                            continue
+                    #     except Exception as e:
+                    #         continue
 
                 last_obs = curr_obs.copy()
 
