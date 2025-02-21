@@ -151,10 +151,6 @@ for subfolder in subfolders:
             timestamp = data_dict['timestamp']  # 记录时间戳
             # action_state = np.concatenate([current_position, current_rpy, data_dict['ft_compensated']], axis=-1)
             action_state = np.concatenate([delta_position, delta_rpy, force], axis=-1)
-            delta_position_length = np.linalg.norm(delta_position)
-            force_magnitude = np.linalg.norm(force)
-            print('delta_position_lenth:',delta_position_length, 'force:', force_magnitude)
-        
         
             # img_arrays.append(obs_image)
             force_arrays.append(force)

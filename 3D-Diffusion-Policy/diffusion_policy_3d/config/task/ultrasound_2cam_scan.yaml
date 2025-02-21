@@ -1,0 +1,40 @@
+name: ultrasound_2cam_scan
+
+task_name: scan
+
+image_shape: &image_shape [1, 84, 84]
+image2_shape: &image2_shape [4, 64, 64]
+shape_meta: &shape_meta
+  # acceptable types: rgb, low_dim
+  obs:
+    img:
+        shape: *image_shape
+        type: rgb
+    img2:
+        shape: *image2_shape
+        type: rgb
+    state:
+      shape: [18]
+      type: low_dim
+    force:
+      shape: [6]
+      type: low_dim
+  action:
+    shape: [12] # state + force
+
+env_runner: null
+# env_runner:
+#   _target_: diffusion_policy_3d.env_runner.ultrasound_runner.Ultrasound2CamRunner
+#   eval_episodes: 20
+#   n_obs_steps: ${n_obs_steps}
+#   n_action_steps: ${n_action_steps}
+
+dataset:
+  _target_: diffusion_policy_3d.dataset.ultrasound_dataset.Ultrasound2CamDataset
+  zarr_path: data/ultrasound_data_2cam.zarr
+  horizon: ${horizon}
+  pad_before: ${eval:'${n_obs_steps}-1'}
+  pad_after: ${eval:'${n_action_steps}-1'}
+  seed: 42
+  val_ratio: 0.02
+  max_train_episodes: 90

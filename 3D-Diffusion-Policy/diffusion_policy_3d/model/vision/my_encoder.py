@@ -7,7 +7,7 @@ import copy
 from typing import Optional, Dict, Tuple, Union, List, Type
 from termcolor import cprint
 
-from torchvision.models import resnet34
+from torchvision.models import resnet34, resnet18
 from diffusion_policy_3d.model.vision.pointnet_extractor import PointNetEncoderXYZ, PointNetEncoderXYZRGB
 
 def create_mlp(
@@ -596,3 +596,142 @@ class ForcePositionEncoder(nn.Module):
     
     def output_shape(self):
         return self.n_output_channels
+    
+
+
+class Ultrasound2CamEncoder(nn.Module):
+    '''
+    resnet-34 for image2, 4channel
+    resnet-18 for image1, 1channel
+    mlp for force and 
+    '''
+    def __init__(
+        self,
+        observation_space: Dict,
+        out_channel = 256,
+        ultrasound_encoder_cfg = None,
+        debug: bool = False,
+    ):
+        super(Ultrasound2CamEncoder, self).__init__()
+        
+        self.n_output_channels = out_channel
+        self.resnet_output_dim = ultrasound_encoder_cfg.resnet_output_dim
+        self.force_input_dim = observation_space['force']
+        self.state_shape = observation_space['state']
+
+        self.state_output_dim = ultrasound_encoder_cfg.state_output_dim
+        self.force_output_dim = ultrasound_encoder_cfg.force_output_dim
+
+        
+
+        block_channel = [64, 64]
+        self.debug = debug
+        pretrained = ultrasound_encoder_cfg.pretrained
+        use_layernorm = ultrasound_encoder_cfg.use_layernorm
+       
+        
+        # ResNet-18 for Image Encoding
+        resnet1 = resnet18(pretrained=pretrained)
+        resnet1.conv1 = nn.Conv2d(1, resnet1.conv1.out_channels, kernel_size=resnet1.conv1.kernel_size, 
+                                  stride=resnet1.conv1.stride, padding=resnet1.conv1.padding, bias=resnet1.conv1.bias)
+        self.cnn1 = nn.Sequential(*list(resnet1.children())[:-1])  # Remove the fully connected layer
+        self.cnn_fc1 = nn.Linear(resnet1.fc.in_features, self.resnet_output_dim)
+
+        # Resnet-34 for wrist camera
+        resnet2 = resnet34(pretrained=pretrained)
+        resnet2.conv1 = nn.Conv2d(4, resnet2.conv1.out_channels, kernel_size=resnet2.conv1.kernel_size, 
+                                  stride=resnet2.conv1.stride, padding=resnet2.conv1.padding, bias=resnet2.conv1.bias)
+        self.cnn2 = nn.Sequential(*list(resnet2.children())[:-1])  # Remove the fully connected layer
+        self.cnn_fc2 = nn.Linear(resnet2.fc.in_features, self.resnet_output_dim)
+
+
+        
+        
+        # MLP for Force Sensor Encoding
+        # self.force_mlp = nn.Sequential(
+        #     create_mlp(self.force_input_dim, out_channel, net_arch, state_mlp_activation_fn),
+        #     nn.Linear(net_arch[-1], self.resnet_output_dim),
+        # )
+        self.force_mlp = nn.Sequential(
+            nn.Linear(self.force_input_dim[0], block_channel[0]),
+            nn.LayerNorm(block_channel[0]) if use_layernorm else nn.Identity(),
+            nn.ReLU(),
+            nn.Linear(block_channel[0], block_channel[1]),
+            nn.LayerNorm(block_channel[1]) if use_layernorm else nn.Identity(),
+            nn.ReLU(),
+            nn.Linear(block_channel[-1], self.force_output_dim),
+        )
+        
+        
+        # MLP for Joint State Encoding
+        # self.joint_mlp = nn.Sequential(
+        #     create_mlp(self.ee_input_dim, out_channel, net_arch, state_mlp_activation_fn),
+        #     nn.Linear(self.ee_input_dim[-1], self.resnet_output_dim),
+        # )
+        self.joint_mlp = nn.Sequential(
+            nn.Linear(self.state_shape[0], block_channel[0]),
+            nn.LayerNorm(block_channel[0]) if use_layernorm else nn.Identity(),
+            nn.ReLU(),
+            nn.Linear(block_channel[0], block_channel[1]),
+            nn.LayerNorm(block_channel[1]) if use_layernorm else nn.Identity(),
+            nn.ReLU(),
+            nn.Linear(block_channel[-1], self.state_output_dim),
+        )
+        
+        # Final Fully Connected Layer
+        # self.final_fc = nn.Linear(3 * self.resnet_output_dim, out_channel)
+
+        self.final_fc = nn.Linear(self.state_output_dim + self.force_output_dim + 2*self.resnet_output_dim, out_channel)
+    
+    # @staticmethod
+    # def create_mlp(input_dim: int, net_arch: List[int], activation_fn: Type[nn.Module]) -> List[nn.Module]:
+    #     layers = []
+    #     for hidden_dim in net_arch:
+    #         layers.append(nn.Linear(input_dim, hidden_dim))
+    #         layers.append(activation_fn())
+    #         input_dim = hidden_dim
+    #     return layers
+
+    def forward(self, observations: Dict[str, torch.Tensor]) -> torch.Tensor:
+
+        img1 = observations['img']  # Shape: [B, C, H, W]   
+        # print('imgshape:',img.shape)     
+        img_features1 = self.cnn1(img1)  # Shape: [B, 512, 1, 1]
+        img_features1 = img_features1.view(img_features1.size(0), -1)  # Shape: [B, 512]
+        img_features1 = self.cnn_fc1(img_features1)  # Shape: [B, resnet_output_dim]
+
+        img2 = observations['img2']  # Shape: [B, C, H, W]   
+        # print('imgshape:',img.shape)     
+        img_features2 = self.cnn2(img2)  # Shape: [B, 512, 1, 1]
+        img_features2 = img_features2.view(img_features2.size(0), -1)  # Shape: [B, 512]
+        img_features2 = self.cnn_fc2(img_features2)  # Shape: [B, resnet_output_dim]
+        
+        force = observations['force']  # Shape: [B, 6]
+        force_features = self.force_mlp(force)  # Shape: [B, resnet_output_dim]
+
+        joint = observations['state']  # Shape: [B, N]
+        joint_features = self.joint_mlp(joint)  # Shape: [B, resnet_output_dim]
+
+        # Concatenate and Process
+        combined_features = torch.cat([img_features1, img_features2, force_features, joint_features], dim=-1)  # Shape: [B, 3 * resnet_output_dim]
+            
+        
+        output = self.final_fc(combined_features)  # Shape: [B, output_dim]
+
+
+        if self.debug:
+            print(f"[DEBUG] Input image shape: {img1.shape}")
+            print(f"[DEBUG] Image features after CNN shape: {img_features1.shape}")
+            print(f"[DEBUG] Image features after FC layer: {img_features1.shape}")
+            print(f"[DEBUG] Force input shape: {force.shape}")
+            print(f"[DEBUG] Force features after MLP: {force_features.shape}")
+            print(f"[DEBUG] Joint input shape: {joint.shape}")
+            print(f"[DEBUG] Joint features after MLP: {joint_features.shape}")
+            print(f"[DEBUG] Combined features shape: {combined_features.shape}")
+            print(f"[DEBUG] Final output shape: {output.shape}")
+
+        return output
+    
+    def output_shape(self):
+        return self.n_output_channels
+    

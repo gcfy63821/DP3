@@ -238,5 +238,33 @@ inference_force 使用了一些trik，让输出的desired叠加
 
 接下来要做的事情：
     1. 测试一下扫脖子和扫手臂的能否work
-    2. 重新处理数据
-    3. 配置一下服务器
+    2. 重新处理数据 现在数据以0.1秒为间隔
+    3. 配置一下服务器 已完成
+
+
+scp -r -P 14822 /home/robotics/crq/3D-Diffusion-Policy/3D-Diffusion-Policy/data/ultrasound_data_neck.zarr crq@166.111.72.148:/home/crq/crq/DP3/3D-Diffusion-Policy/data
+
+bash scripts/run_video.sh ultrasound_dp ultrasound_scan - 0 0
+
+服务器上面跑了0220-3，4，5，5是cross attention film
+那个里面的dp改成了复杂的，之后需要改回来。
+明天搞相机
+
+采数据的launch：
+roslaunch franka_us_controllers record_data_env.launch
+
+
+运用视频进行run的脚本：
+
+bash scripts/run_video.sh ultrasound_dp ultrasound_scan - 0 0 
+
+**0221**
+搞了一个裁切的，应该可以帮助保存更多的信息。
+今天把两个相机的encoder搞定
+
+我希望把超声图像用resnet18，一个通道，然后腕部相机用resnet34，4个通道
+
+已安装realsense sdk， 打开相机:
+realsense-viewer
+
+open_realsense.py 可以打开realsense相机

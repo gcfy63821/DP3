@@ -149,7 +149,7 @@ class PolicyROSRunner:
     def __init__(self, cfg: OmegaConf, output_dir=None):
         self.cfg = copy.deepcopy(cfg)
         self.device = torch.device(self.cfg.training.device)
-        self.output_dir = 'data/outputs/ultrasound_scan-ultrasound_dp-0213-5_seed0'
+        self.output_dir = 'data/outputs/ultrasound_scan-ultrasound_dp-0217-2_seed0'
 
         # 初始化 ROS 节点
         rospy.init_node('ultrasound_policy_runner', anonymous=True)
@@ -348,6 +348,8 @@ class PolicyROSRunner:
         current_time = None
         prev_timestamp = None
         last_obs = None
+        desired_position = None
+        desired_rpy = None
         
         
         while not rospy.is_shutdown():
@@ -366,6 +368,11 @@ class PolicyROSRunner:
                 if curr_obs is None or curr_img is None:
                     continue
                 curr_obs["img"] = curr_img
+
+                if desired_position is None:
+                    desired_position = curr_obs["state"][6:9]
+                    desired_rpy = curr_obs['state'][9:12]
+
                 
                 if last_obs is None:
                     obs_history = {
@@ -416,15 +423,36 @@ class PolicyROSRunner:
                             # output_position = action_output[:3]
                             # output_rpy = action_output[3:6]
                             # delta control:
-                            output_position = delta_position + curr_obs['state'][i*12+6:i*12+9]
-                            output_rpy = delta_rpy + curr_obs['state'][i*12+9:i*12+12]
+                            # output_position = delta_position + curr_obs['state'][i*12+6:i*12+9]
+                            # output_rpy = delta_rpy + curr_obs['state'][i*12+9:i*12+12]
+                            # output_orientation = R.from_euler('xyz', output_rpy).as_quat()
+                            desired_position += delta_position
+                            # desired_rpy += delta_rpy
+                            desired_rpy = delta_rpy + curr_obs['state'][9:12]
+
+                            output_position = desired_position
+                            output_rpy = desired_rpy
                             output_orientation = R.from_euler('xyz', output_rpy).as_quat()
 
-                            self.publish_pose_and_wrench(output_wrench, output_position, output_orientation)
+                
+                            # self.publish_pose_and_wrench(output_wrench, output_position, output_orientation)
                             
-                            # 发布 TF 变换
-                            self.publish_tf(output_position, output_orientation, frame_id="panda_link0", child_id="action_frame")
+                            # # 发布 TF 变换
+                            # self.publish_tf(output_position, output_orientation, frame_id="panda_link0", child_id="action_frame")
                             
+                            
+                            delta_position_length = np.linalg.norm(output_position - curr_obs['state'][6:9])
+                            force_magnitude = np.linalg.norm(output_wrench)
+
+                            print('delta_position_lenth:',delta_position_length, 'force:', force_magnitude)
+                            
+                            
+                            if delta_position_length < 0.04:
+                                self.publish_tf(output_position, output_orientation, frame_id="panda_link0", child_id="action_frame")
+                                self.publish_pose_and_wrench(output_wrench, output_position, output_orientation)
+                            else: # back to stable
+                                desired_position = curr_obs["state"][6:9]
+                                desired_rpy = curr_obs['state'][9:12]
                             self.rate.sleep()
 
                         except Exception as e:

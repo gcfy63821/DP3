@@ -8,18 +8,34 @@ from termcolor import cprint
 import tqdm
 from scipy.spatial.transform import Rotation as R
 import copy
+import cv2
 
-def preproces_image(image):
+def preproces_image1(image):
     img_size = 84
+    
+    # 将图像转换为灰度图像
+    image = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY)
     
     image = image.astype(np.float32)
     image = torch.from_numpy(image).cuda()
-    image = image.permute(2, 0, 1) # HxWx4 -> 4xHxW
+    image = image.unsqueeze(0)  # 添加通道维度，变为 1xHxW
 
     min_x, max_x = 100, 480
     min_y, max_y = 50, 330
 
     image = image[:, min_y:max_y, min_x:max_x]
+
+    image = torchvision.transforms.functional.resize(image, (img_size, img_size))
+    image = image.cpu().numpy()
+    return image
+
+def preproces_image2(image):
+    img_size = 64
+       
+    image = image.astype(np.float32)
+    image = torch.from_numpy(image).cuda()
+    image = image.permute(2, 0, 1) # HxWx4 -> 4xHxW
+
 
     image = torchvision.transforms.functional.resize(image, (img_size, img_size))
     image = image.permute(1, 2, 0) # 4xHxW -> HxWx4
@@ -54,8 +70,8 @@ def extract_timestamp(file_path):
 # 输入路径（包含.npy文件）
 # expert_data_path = '/home/robotics/crq/3D-Diffusion-Policy/3D-Diffusion-Policy/data/record_data/20250120'
 # save_data_path = '/home/robotics/crq/3D-Diffusion-Policy/3D-Diffusion-Policy/data/ultrasound_data.zarr'
-expert_data_path = '/media/robotics/ST_16T/crq/data/record_data/20250220'
-save_data_path = '/home/robotics/crq/3D-Diffusion-Policy/3D-Diffusion-Policy/data/ultrasound_data_neck.zarr'
+expert_data_path = '/media/robotics/ST_16T/crq/data/record_data/2cam'
+save_data_path = '/home/robotics/crq/3D-Diffusion-Policy/3D-Diffusion-Policy/data/ultrasound_data_2cam.zarr'
 N = 10  # 采样间隔
 T = 3
 # 获取目录下所有子文件夹
@@ -65,6 +81,7 @@ subfolders = sorted(subfolders)
 # storage
 total_count = 0
 img_arrays = []
+img2_arrays = []
 state_arrays = []
 force_arrays = []
 action_arrays = []
@@ -151,8 +168,10 @@ for subfolder in subfolders:
 
 
 
-            obs_image = data_dict['image']
-            obs_image = preproces_image(obs_image)
+            us_image = data_dict['image']
+            us_image = preproces_image1(us_image)
+            realsense_image = data_dict['combined_image']
+            realsense_image = preproces_image2(realsense_image)
             # force = np.concatenate([data_dict['ft_compensated'], data_dict['netft']], axis=-1)
             force = data_dict['ft_compensated']
             # robot_state = np.concatenate([initial_position, initial_orientation, delta_position, delta_orientation], axis=-1)
@@ -162,7 +181,8 @@ for subfolder in subfolders:
             timestamp = data_dict['timestamp']  # 记录时间戳
             action_state = np.concatenate([delta_position, delta_rpy, force], axis=-1)
         
-            img_arrays.append(obs_image)
+            img_arrays.append(us_image)
+            img2_arrays.append(realsense_image)
             force_arrays.append(force)
             state_arrays.append(robot_state)
             timestamp_arrays.append(timestamp)
@@ -187,7 +207,10 @@ img_arrays = np.stack(img_arrays, axis=0)
 # if img_arrays.shape[1] == 3:  # make channel last
 #     img_arrays = np.transpose(img_arrays, (0, 2, 3, 1))
 # 假设 img 是形状为 [256, 84, 84, 3] 的张量
-img_arrays = np.transpose(img_arrays, (0, 3, 1, 2))
+# img_arrays = np.transpose(img_arrays, (0, 3, 1, 2))
+
+img2_arrays = np.stack(img2_arrays, axis=0)
+img2_arrays = np.transpose(img2_arrays, (0, 3, 1, 2))
 
 action_arrays = np.stack(action_arrays, axis=0)
 state_arrays = np.stack(state_arrays, axis=0)
@@ -197,6 +220,7 @@ episode_ends_arrays = np.array(episode_ends_arrays)
 
 compressor = zarr.Blosc(cname='zstd', clevel=3, shuffle=1)
 img_chunk_size = (100, img_arrays.shape[1], img_arrays.shape[2], img_arrays.shape[3])
+img2_chunk_size = (100, img2_arrays.shape[1], img2_arrays.shape[2], img2_arrays.shape[3])
 
 if len(action_arrays.shape) == 2:
     action_chunk_size = (100, action_arrays.shape[1])
@@ -207,6 +231,8 @@ else:
 
 # 将数据写入 zarr 文件
 zarr_data.create_dataset('img', data=img_arrays, chunks=img_chunk_size, dtype='uint8', overwrite=True, compressor=compressor)
+zarr_data.create_dataset('img2', data=img2_arrays, chunks=img2_chunk_size, dtype='uint8', overwrite=True, compressor=compressor)
+
 zarr_data.create_dataset('action', data=action_arrays, chunks=action_chunk_size, dtype='float32', overwrite=True, compressor=compressor)
 zarr_data.create_dataset('state', data=state_arrays, chunks=(100, state_arrays.shape[1]), dtype='float32', overwrite=True, compressor=compressor)
 zarr_data.create_dataset('force', data=force_arrays, chunks=(100, force_arrays.shape[1]), dtype='float32', overwrite=True, compressor=compressor)
@@ -215,6 +241,8 @@ zarr_meta.create_dataset('episode_ends', data=episode_ends_arrays, chunks=(100,)
 
 # 打印输出
 cprint(f'img shape: {img_arrays.shape}, range: [{np.min(img_arrays)}, {np.max(img_arrays)}]', 'green')
+cprint(f'img2 shape: {img2_arrays.shape}, range: [{np.min(img2_arrays)}, {np.max(img2_arrays)}]', 'green')
+
 cprint(f'action shape: {action_arrays.shape}, range: [{np.min(action_arrays)}, {np.max(action_arrays)}]', 'green')
 cprint(f'state shape: {state_arrays.shape}, range: [{np.min(state_arrays)}, {np.max(state_arrays)}]', 'green')
 cprint(f'force shape: {force_arrays.shape}, range: [{np.min(force_arrays)}, {np.max(force_arrays)}]', 'green')

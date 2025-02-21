@@ -141,25 +141,33 @@ class UltrasoundRunner(BaseRunner):
                 curr_state = state.cpu().numpy()
                 output_position = nactions[:3] + curr_state[6:9]
                 output_rpy = nactions[3:6] + curr_state[9:12]
-
                 output_orientation = R.from_euler('xyz', output_rpy).as_quat()
 
-                # output_position2 = nactions[12:15]
-                # output_rpy2 = nactions[15:18]
-                # output_orientation2 = R.from_euler('xyz', output_rpy2).as_quat()
+                data_action_position = real_action[:3] + curr_state[6:9]
+                data_action_rpy = real_action[3:6] + curr_state[9:12]
+                data_action_orientation = R.from_euler('xyz', data_action_rpy).as_quat()
 
-                # output_position3 = nactions[24:27]
-                # output_rpy3 = nactions[27:30]
-                # output_orientation3 = R.from_euler('xyz', output_rpy3).as_quat()
 
-                position = state[6:9].cpu()
-                euler = state[9:12].cpu()
+                try:
+                    output_position2 = nactions[12:15]+ curr_state[6:9]
+                    output_rpy2 = nactions[15:18]+ curr_state[9:12]
+                    output_orientation2 = R.from_euler('xyz', output_rpy2).as_quat()
 
-                self.publish_tf(output_position, output_orientation, frame_id="panda_link0", child_id="action_frame")
-                self.publish_tf(position, R.from_euler('xyz', euler).as_quat(), frame_id="panda_link0", child_id="current_state_frame")
-                # self.publish_tf(output_position2, output_orientation2, frame_id="panda_link0", child_id="action_frame2")
-                # self.publish_tf(output_position3, output_orientation3, frame_id="panda_link0", child_id="action_frame3")
-                
+                    output_position3 = nactions[24:27]+ curr_state[6:9]
+                    output_rpy3 = nactions[27:30]+ curr_state[9:12]
+                    output_orientation3 = R.from_euler('xyz', output_rpy3).as_quat()
+
+                    position = state[6:9].cpu()
+                    euler = state[9:12].cpu()
+
+                    self.publish_tf(output_position, output_orientation, frame_id="panda_link0", child_id="action_frame")
+                    self.publish_tf(position, R.from_euler('xyz', euler).as_quat(), frame_id="panda_link0", child_id="current_state_frame")
+                    self.publish_tf(output_position2, output_orientation2, frame_id="panda_link0", child_id="action_frame2")
+                    self.publish_tf(output_position3, output_orientation3, frame_id="panda_link0", child_id="action_frame3")
+                    self.publish_tf(data_action_position, data_action_orientation, frame_id="panda_link0", child_id="real_action")
+                    
+                except Exception as e:
+                    continue
                 
                 if episode_end: # not implemented
                     done = True
