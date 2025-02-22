@@ -65,7 +65,7 @@ policy:
     out_channels: ${policy.encoder_output_dim}
     resnet_output_dim: 64  # ResNet feature output dimension
     state_output_dim: 64
-    force_output_dim: 32
+    force_output_dim: 64
     pretrained: False  # Whether to use pretrained weights for ResNet
     use_layernorm: False
     debug: False

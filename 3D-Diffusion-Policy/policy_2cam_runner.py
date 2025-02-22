@@ -36,21 +36,47 @@ from torch.utils.data import DataLoader
 import time
 from scipy.spatial.transform import Rotation as R
 import pyrealsense2 as rs
+import pytorch3d.transforms as pt
+import collections
+
 
 OmegaConf.register_new_resolver("eval", eval, replace=True)
- 
+
+def quaternion_to_rotation_6d(quaternion):
+    """
+    将四元数转换为6D旋转表示
+    """
+    rotation_matrix = pt.quaternion_to_matrix(torch.tensor(quaternion).view(1, 4))
+    rotation_6d = pt.matrix_to_rotation_6d(rotation_matrix).squeeze().numpy()
+    return rotation_6d
+
+
+def rotation6d_to_quaternion(rotation6d):
+    """
+    将6D旋转表示转换为四元数
+    :param rotation6d: 6D旋转表示 形状为 (6,)
+    :return: 四元数，形状为 (4,)
+    """
+    # 将6D旋转表示转换为旋转矩阵
+    rotation_matrix = pt.rotation_6d_to_matrix(torch.tensor(rotation6d).view(1, 6))
+    
+    # 将旋转矩阵转换为四元数
+    quaternion = pt.matrix_to_quaternion(rotation_matrix).squeeze().numpy()
+    
+    return quaternion
 
 
 class PolicyROSRunner:
     def __init__(self, cfg: OmegaConf, output_dir=None):
         self.cfg = copy.deepcopy(cfg)
         self.device = torch.device(self.cfg.training.device)
-        self.output_dir = 'data/outputs/ultrasound_scan-ultrasound_dp-0221-1_seed0'
+        self.output_dir = 'data/outputs/ultrasound_2cam_scan-ultrasound_dp_2cam-0222-9_seed0'
 
         # 初始化 ROS 节点
         rospy.init_node('ultrasound_policy_runner', anonymous=True)
 
         self.n_obs_steps = self.cfg.policy.n_obs_steps
+        self.n_action_steps = self.cfg.policy.n_action_steps
         self.history = deque(maxlen=self.n_obs_steps)
 
         
@@ -107,7 +133,6 @@ class PolicyROSRunner:
         self.bridge = CvBridge()
         self.agent_pos_data = []
         self.ft_compensated_data = []
-        self.netft_data = []
         self.initial_position = None
         self.initial_orientation = None
 
@@ -120,7 +145,7 @@ class PolicyROSRunner:
         self.prev_timestamp = None
         ########################################
         # 设置视频捕获设备，0 是本地摄像头
-        camera_id = 0 # 这个是超声的
+        camera_id = 2 # 这个是超声的
         self.cap = cv2.VideoCapture(camera_id, cv2.CAP_V4L2)
 
         if not self.cap.isOpened():
@@ -144,6 +169,12 @@ class PolicyROSRunner:
         self.tf_listener = tf.TransformListener()
 
         self.pipeline = initialize_realsense()
+
+        self.state_queue = deque(maxlen=self.n_obs_steps)
+        self.force_queue = deque(maxlen=self.n_obs_steps)
+        self.img_queue = deque(maxlen=self.n_obs_steps)
+        self.img2_queue = deque(maxlen=self.n_obs_steps)
+
 
         
     def get_panda_EE_transform(self):
@@ -215,12 +246,14 @@ class PolicyROSRunner:
         # img = self.preproces_image(img)
         # obs_history = {"point_cloud": point_cloud, "img": img}
 
-        obs_history = {"img": None,"img2":None}
+        # obs_history = {"img": None,"img2":None}
 
         position, orientation = self.get_panda_EE_transform()
         if position is None or orientation is None:
             return
         euler = R.from_quat(orientation).as_euler('xyz', degrees=False)
+        rotation_6d = quaternion_to_rotation_6d(orientation)
+
                 
         if self.initial_position is None:
             self.initial_position = copy.deepcopy(position)
@@ -247,17 +280,23 @@ class PolicyROSRunner:
             velocity = np.zeros(3)
             w = np.zeros(3)
         
-        state = np.concatenate([position_to_initial, rpy_to_initial, position, euler, velocity, w], axis=-1)
+        
+        # state = np.concatenate([position_to_initial, rpy_to_initial, position, euler, velocity, w], axis=-1)
         # state = np.concatenate([position, euler, velocity, w], axis=-1)
+        state = np.concatenate([position, rotation_6d, velocity, w, position_to_initial], axis=-1)
         force = self.curr_force.copy()
 
-        obs_history["state"] = state
-        obs_history["force"] = force
+        # obs_history["state"] = state
+        # obs_history["force"] = force
         self.prev_rpy = euler
         self.prev_position = position
         self.prev_timestamp = timestamp
 
-        return obs_history
+        # self.state_queue.append(state)
+        # self.force_queue.append(force)
+
+        # return obs_history
+        return state, force
 
     def run(self):
         # 处理输入并运行 policy
@@ -270,6 +309,8 @@ class PolicyROSRunner:
         last_obs = None
         desired_position = None
         desired_rpy = None
+
+        obs_queue = collections.deque(maxlen=self.n_obs_steps)
         
         
         while not rospy.is_shutdown():
@@ -284,146 +325,142 @@ class PolicyROSRunner:
                     # 避免开始的时候有绿色的帧
                     time.sleep(1)
                 current_time = rospy.get_time()
-                curr_obs = self.obs2dp_obs()
+                # curr_obs = self.obs2dp_obs()
+
+                # state, force
+                state, force = self.obs2dp_obs()
 
                 curr_img = self.preproces_image1(frame)
 
                 depth_image_normalized = cv2.normalize(depth_image, None, 0, 255, cv2.NORM_MINMAX)
                 depth_image_normalized = depth_image_normalized.astype(np.uint8)
                 combined_image = np.dstack((color_image, depth_image_normalized))
-                    
                 curr_img2 = self.preproces_image2(combined_image)
                 
-                if curr_obs is None or curr_img is None:
+                if curr_img is None:
                     continue
-                curr_obs["img"] = curr_img
-                curr_obs["img2"] = curr_img2
+                # curr_obs["img"] = curr_img
+                # curr_obs["img2"] = curr_img2
 
-                if desired_position is None:
-                    desired_position = curr_obs["state"][6:9]
-                    desired_rpy = curr_obs['state'][9:12]
+                # self.img_queue.append(curr_img)
+                # self.img2_queue.append(curr_img2)
+                device = self.device
+                img = torch.from_numpy(curr_img).to(device)  # 将图像移动到 GPU
+                state = torch.from_numpy(state).to(device)  # 将状态移动到 GPU
+                force = torch.from_numpy(force).to(device)  # 将力的张量移动到 GPU
+                img2 = torch.from_numpy(curr_img2).to(device)  # 将动作张量移动到 GPU（如果需要）
+                
+                obs_queue.append({
+                    'img': img,
+                    'state': state,
+                    'force': force,
+                    'img2' : img2,
+                    # 'point_cloud': point_cloud
+                })
 
                 
-                if last_obs is None:
-                    obs_history = {
-                        k: [np.array(v, dtype=self._get_type(v))] * self.cfg.n_obs_steps for k, v in curr_obs.items()
-                    }
-                else:
-                    obs_history = {}
-                    obs_history["state"] = [
-                        np.array(last_obs["state"], dtype=np.float32),
-                        np.array(curr_obs["state"], dtype=np.float32),
-                    ]
-                    obs_history["force"] = [
-                        np.array(last_obs["force"], dtype=np.float32),
-                        np.array(curr_obs["force"], dtype=np.float32),
-                    ]
-                    obs_history["img"] = [
-                        np.array(last_obs["img"], dtype=np.float32),
-                        np.array(curr_obs["img"], dtype=np.float32),
-                    ]
-                    obs_history["img2"] = [
-                        np.array(last_obs["img2"], dtype=np.float32),
-                        np.array(curr_obs["img2"], dtype=np.float32),
-                    ]
+                # 确保队列长度与 n_obs_steps 匹配
+                if len(obs_queue) < self.n_obs_steps:
+                    continue  # 如果队列长度不足，等待更多数据
+
+                obs_dict = {
+                    'img': torch.stack([obs['img'] for obs in obs_queue]).unsqueeze(0),
+                    'state': torch.stack([obs['state'] for obs in obs_queue]).unsqueeze(0),
+                    'force': torch.stack([obs['force'] for obs in obs_queue]).unsqueeze(0),
+                    'img2': torch.stack([obs['img2'] for obs in obs_queue]).unsqueeze(0),
+                    
+                    # 'point_cloud': torch.stack([obs['point_cloud'] for obs in obs_queue]).unsqueeze(0)
+                }
+                
+                # if last_obs is None:
+                #     obs_history = {
+                #         k: [np.array(v, dtype=self._get_type(v))] * self.cfg.n_obs_steps for k, v in curr_obs.items()
+                #     }
+                # else:
+                #     obs_history = {}
+                #     obs_history["state"] = [
+                #         np.array(last_obs["state"], dtype=np.float32),
+                #         np.array(curr_obs["state"], dtype=np.float32),
+                #     ]
+                #     obs_history["force"] = [
+                #         np.array(last_obs["force"], dtype=np.float32),
+                #         np.array(curr_obs["force"], dtype=np.float32),
+                #     ]
+                #     obs_history["img"] = [
+                #         np.array(last_obs["img"], dtype=np.float32),
+                #         np.array(curr_obs["img"], dtype=np.float32),
+                #     ]
+                #     obs_history["img2"] = [
+                #         np.array(last_obs["img2"], dtype=np.float32),
+                #         np.array(curr_obs["img2"], dtype=np.float32),
+                #     ]
 
 
-                prepped_data = {k: torch.tensor(np.array([v]), device="cuda") for k, v in obs_history.items()}
+                # prepped_data = {k: torch.tensor(np.array([v]), device="cuda") for k, v in obs_history.items()}
 
                 with torch.no_grad():
                     print('start_inference')
                     start_time = rospy.get_time()
-                    action_dict = self.policy.predict_action(prepped_data)
+                    action_dict = self.policy.predict_action(obs_dict)
                     print('time_cost:', rospy.get_time() - start_time)
                     action_output = action_dict["action"].cpu().numpy().flatten()
-                    delta_position = action_output[:3]
-                    # delta_rpy = action_output[3:6]
-                    # output_wrench = action_output[6:12]
-                    output_wrench = action_output[10:16]
-                    # direct control:
-                    # output_position = action_output[:3]
-                    # output_rpy = action_output[3:6]
-                    # delta control:
-                    # output_position = delta_position + curr_obs['state'][6:9]
-                    # output_rpy = delta_rpy + curr_obs['state'][9:12]
-                    
-                    # desired pos:
-                    desired_position += delta_position
-                    # desired_rpy += delta_rpy
-                    # desired_rpy = delta_rpy + curr_obs['state'][9:12]
+                try:
+                    if desired_position is None:
+                        curr_state = state.cpu().numpy()
+                        desired_position = curr_state[:3]
+                        desired_rotation6d = curr_state[3:9]
 
-                    output_position = desired_position
-                    output_rpy = desired_rpy
-                    
-                    # output_orientation = R.from_euler('xyz', output_rpy).as_quat()
-                    output_orientation = action_output[6:10]
-                    # 为了防止不合法，进行归一化
-                    output_orientation = output_orientation / np.linalg.norm(output_orientation)
+                    # for i in range(self.n_action_steps):
+                    for i in range(1):
+                        this_action = action_output[i*21 : i*21 + 21]
+                        # desired:
+                        # desired_position += nactions[9:12]
+                        # desired_position = nactions[:3]
+                        
+                        desired_position = this_action[:3]
+                        delta_position = this_action[9:12]
+                        delta_rpy = this_action[12:15]
 
-                    delta_position_length = np.linalg.norm(output_position - curr_obs['state'][6:9])
-                    force_magnitude = np.linalg.norm(output_wrench)
-                    print('delta_position_lenth:',delta_position_length, 'force:', force_magnitude)
-                    
-                    if delta_position_length < 0.04:
+                        # desired_position += delta_position
+                        desired_rotation6d = this_action[3:9]
+                        desired_orientation = rotation6d_to_quaternion(desired_rotation6d)
+
+                        output_position = desired_position
+                        output_orientation = desired_orientation
+                        output_wrench = abs(this_action[15:21])
+                        
+                        self.publish_tf(output_position, output_orientation, frame_id="panda_link0", child_id=f"action_frame_{i}")
+
                         self.publish_pose_and_wrench(output_wrench, output_position, output_orientation)
-                    else: # back to stable
-                        desired_position = curr_obs["state"][6:9]
-                        desired_rpy = curr_obs['state'][9:12]
+                        # curr_state = state.cpu().numpy()
+                        # print(1)
+                        print('force:',output_wrench)
 
-                    # 发布 TF 变换
-                    self.publish_tf(output_position, output_orientation, frame_id="panda_link0", child_id="action_frame")
+                        # delta_position_length = np.linalg.norm(output_position - curr_state[:3])
+                        # force_magnitude = np.linalg.norm(output_wrench)
+                        # print('delta_position_lenth:',delta_position_length, 'force:', force_magnitude)
+                        
+                        # if delta_position_length < 0.04:
+                        #     self.publish_pose_and_wrench(output_wrench, output_position, output_orientation)
+                        #     self.publish_tf(output_position, output_orientation, frame_id="panda_link0", child_id=f"action_frame")
+
+                        # else: # back to stable
+                        #     desired_position = curr_state[:3]
+                        #     desired_rotation6d = curr_state[3:9]
+                        #     print('going back')
+
+
+                        self.rate.sleep()
+
                     
-                    # print(action_output)
-                    # for i in range(3):
-                    #     try:
-                    #         delta_position = action_output[i*12:i*12 +3]
-                    #         delta_rpy = action_output[i*12+3:i*12 +6]
-                    #         output_wrench = -1 * action_output[i*12+6:i*12+12]
-                    #         # direct control:
-                    #         # output_position = action_output[:3]
-                    #         # output_rpy = action_output[3:6]
-                    #         # delta control:
-                    #         # output_position = delta_position + curr_obs['state'][i*12+6:i*12+9]
-                    #         # output_rpy = delta_rpy + curr_obs['state'][i*12+9:i*12+12]
-                    #         # output_orientation = R.from_euler('xyz', output_rpy).as_quat()
-                    #         desired_position += delta_position
-                    #         # desired_rpy += delta_rpy
-                    #         desired_rpy = delta_rpy + curr_obs['state'][9:12]
-
-                    #         output_position = desired_position
-                    #         output_rpy = desired_rpy
-                    #         output_orientation = R.from_euler('xyz', output_rpy).as_quat()
-
-                
-                    #         # self.publish_pose_and_wrench(output_wrench, output_position, output_orientation)
-                            
-                    #         # # 发布 TF 变换
-                    #         # self.publish_tf(output_position, output_orientation, frame_id="panda_link0", child_id="action_frame")
-                            
-                            
-                    #         delta_position_length = np.linalg.norm(output_position - curr_obs['state'][6:9])
-                    #         force_magnitude = np.linalg.norm(output_wrench)
-
-                    #         print('delta_position_lenth:',delta_position_length, 'force:', force_magnitude)
-                            
-                            
-                    #         if delta_position_length < 0.04:
-                    #             self.publish_tf(output_position, output_orientation, frame_id="panda_link0", child_id="action_frame")
-                    #             self.publish_pose_and_wrench(output_wrench, output_position, output_orientation)
-                    #         else: # back to stable
-                    #             desired_position = curr_obs["state"][6:9]
-                    #             desired_rpy = curr_obs['state'][9:12]
-                    #         self.rate.sleep()
-
-                    #     except Exception as e:
-                    #         continue
-
-                last_obs = curr_obs.copy()
+                except Exception as e:
+                    print(e)
+                    continue
 
                 if self.curr_force is None:
                     rospy.logwarn("No synced ft compensated data")
 
-                self.rate.sleep()
+
                 key = cv2.waitKey(1)
                 if key == ord('q'):
                     break
@@ -447,18 +484,10 @@ class PolicyROSRunner:
             msg.wrench.torque.y,
             msg.wrench.torque.z
         ])
+        self.curr_force = ft_compensated
         self.ft_compensated_data.append((msg.header.stamp.to_sec(), ft_compensated))  # 使用 ROS 时间戳
 
-    def netft_callback(self, msg):
-        netft = np.array([
-            msg.wrench.force.x,
-            msg.wrench.force.y,
-            msg.wrench.force.z,
-            msg.wrench.torque.x,
-            msg.wrench.torque.y,
-            msg.wrench.torque.z
-        ])
-        self.netft_data.append((msg.header.stamp.to_sec(), netft))  # 使用 ROS 时间戳
+
 
     def agent_pos_callback(self, msg):
         # 处理机械臂末端位置和关节数据

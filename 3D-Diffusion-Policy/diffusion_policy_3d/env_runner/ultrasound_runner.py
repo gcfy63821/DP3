@@ -13,11 +13,30 @@ import tf
 import tf2_ros
 import rospy
 from geometry_msgs.msg import TransformStamped
+import pytorch3d.transforms as pt
 
 # eval_data_path = '/home/robotics/crq/3D-Diffusion-Policy/3D-Diffusion-Policy/data/eval_data.zarr'
 eval_data_path = '/home/robotics/crq/3D-Diffusion-Policy/3D-Diffusion-Policy/data/ultrasound_data_neck.zarr'
 # eval_data_path = '/home/robotics/crq/3D-Diffusion-Policy/3D-Diffusion-Policy/data/ultrasound_data_force_position.zarr'
 cam2_data_path = '/home/robotics/crq/3D-Diffusion-Policy/3D-Diffusion-Policy/data/ultrasound_data_2cam.zarr'
+
+
+
+
+def rotation6d_to_quaternion(rotation6d):
+    """
+    将6D旋转表示转换为四元数
+    :param rotation6d: 6D旋转表示 形状为 (6,)
+    :return: 四元数，形状为 (4,)
+    """
+    # 将6D旋转表示转换为旋转矩阵
+    rotation_matrix = pt.rotation_6d_to_matrix(torch.tensor(rotation6d).view(1, 6))
+    
+    # 将旋转矩阵转换为四元数
+    quaternion = pt.matrix_to_quaternion(rotation_matrix).squeeze().numpy()
+    
+    return quaternion
+
 
 
 class UltrasoundRunner(BaseRunner):
@@ -248,7 +267,9 @@ class Ultrasound2CamRunner(BaseRunner):
                  device="cuda:0"):
         super().__init__(output_dir)
         
-        self.data_path = cam2_data_path  # 从数据集读取
+        # self.data_path = cam2_data_path  # 从数据集读取
+        self.data_path = '/home/robotics/crq/3D-Diffusion-Policy/3D-Diffusion-Policy/data/ultrasound_data_2cam_2.zarr'
+
         self.batch_size = batch_size
         self.device = device
         self.n_obs_steps = n_obs_steps
@@ -357,7 +378,9 @@ class Ultrasound2CamRunner(BaseRunner):
                     # desired_position = curr_state[6:9]
                     # desired_rpy = curr_state[9:12]
                     desired_position = curr_state[:3]
-                    desired_orientation = curr_state[3:7]
+                    # desired_orientation = curr_state[3:7]
+                    desired_rotation6d = curr_state[3:9]
+                
 
                 real_action = actions[t:t+self.n_action_steps].flatten()
                 min_length = min(len(real_action), len(nactions))
@@ -370,40 +393,46 @@ class Ultrasound2CamRunner(BaseRunner):
                 # output_position = nactions[:3]
                 # output_rpy = nactions[3:6]
                 # for delta:
-                
-                # desired:
-                desired_position += nactions[:3]
-                desired_orientation = nactions[6:10]
-                desired_orientation = desired_orientation / np.linalg.norm(desired_orientation)
-
-                output_position = desired_position
-                output_position1 = nactions[3:6]
-                # output_rpy = desired_rpy
-                # output_orientation = R.from_euler('xyz', output_rpy).as_quat()
-                output_orientation = desired_orientation
-
-                data_action_position = real_action[:3] + curr_state[:3]
-                data_action_orientation = curr_state[3:7]
-
-
                 try:
-                    # output_position2 = nactions[12:15]+ curr_state[6:9]
-                    # output_rpy2 = nactions[15:18]+ curr_state[9:12]
-                    # output_orientation2 = R.from_euler('xyz', output_rpy2).as_quat()
+                    for i in range(self.n_action_steps):
+                        this_action = nactions[i*21 : i*21 + 21]
 
-                    # output_position3 = nactions[24:27]+ curr_state[6:9]
-                    # output_rpy3 = nactions[27:30]+ curr_state[9:12]
-                    # output_orientation3 = R.from_euler('xyz', output_rpy3).as_quat()
+                        desired_position = this_action[:3]
+                        # desired_position += this_action[9:12]
+                        
+                        # desired_orientation = nactions[6:10]
+                        # desired_orientation = desired_orientation / np.linalg.norm(desired_orientation)
+                        # desired_rotation6d = nactions[3:9]
+                        desired_rotation6d = this_action[3:9]
+                        
+                        desired_orientation = rotation6d_to_quaternion(desired_rotation6d)
 
-                    position = state[:3].cpu()
-                    orientation = state[3:7].cpu()
-                    orientation = orientation / np.linalg.norm(orientation)
+                        output_position = desired_position
+                        output_orientation = desired_orientation
+                        # output_position1 = nactions[3:6]
+                        # output_rpy = desired_rpy
+                        # output_orientation = R.from_euler('xyz', output_rpy).as_quat()
+                        # output_orientation = desired_orientation
 
-                    self.publish_tf(output_position, output_orientation, frame_id="panda_link0", child_id="action_frame")
-                    self.publish_tf(position, orientation, frame_id="panda_link0", child_id="current_state_frame")
-                    self.publish_tf(output_position1, output_orientation, frame_id="panda_link0", child_id="action_frame_direct")
-                    # self.publish_tf(output_position3, output_orientation3, frame_id="panda_link0", child_id="action_frame3")
-                    self.publish_tf(data_action_position, data_action_orientation, frame_id="panda_link0", child_id="real_action")
+                        data_action_position = real_action[:3]
+                        data_action_orientation = rotation6d_to_quaternion(real_action[3:9])
+
+                        # output_position2 = nactions[12:15]+ curr_state[6:9]
+                        # output_rpy2 = nactions[15:18]+ curr_state[9:12]
+                        # output_orientation2 = R.from_euler('xyz', output_rpy2).as_quat()
+
+                        # output_position3 = nactions[24:27]+ curr_state[6:9]
+                        # output_rpy3 = nactions[27:30]+ curr_state[9:12]
+                        # output_orientation3 = R.from_euler('xyz', output_rpy3).as_quat()
+                        # 从数据
+                        position = state[:3].cpu()
+                        rotation6d = state[3:9].cpu()
+                        orientation = rotation6d_to_quaternion(rotation6d)
+                        self.publish_tf(output_position, output_orientation, frame_id="panda_link0", child_id=f"action_frame_{i}")
+                        self.publish_tf(position, orientation, frame_id="panda_link0", child_id="current_state_frame")
+                        # self.publish_tf(output_position1, output_orientation, frame_id="panda_link0", child_id="action_frame_direct")
+                        # self.publish_tf(output_position3, output_orientation3, frame_id="panda_link0", child_id="action_frame3")
+                        self.publish_tf(data_action_position, data_action_orientation, frame_id="panda_link0", child_id="real_action")
                     
                 except Exception as e:
                     continue

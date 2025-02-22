@@ -69,6 +69,14 @@ def quaternion_inverse(q):
     w, x, y, z = q
     return np.array([w, -x, -y, -z]) / (w**2 + x**2 + y**2 + z**2)
 
+def quaternion_to_rotation_6d(quaternion):
+    """
+    将四元数转换为6D旋转表示
+    """
+    rotation_matrix = pt.quaternion_to_matrix(torch.tensor(quaternion).view(1, 4))
+    rotation_6d = pt.matrix_to_rotation_6d(rotation_matrix).squeeze().numpy()
+    return rotation_6d
+
 def extract_timestamp(file_path):
     # 提取文件名中的时间戳部分
     file_name = os.path.basename(file_path)
@@ -79,8 +87,8 @@ def extract_timestamp(file_path):
 # expert_data_path = '/home/robotics/crq/3D-Diffusion-Policy/3D-Diffusion-Policy/data/record_data/20250120'
 # save_data_path = '/home/robotics/crq/3D-Diffusion-Policy/3D-Diffusion-Policy/data/ultrasound_data.zarr'
 expert_data_path = '/media/robotics/ST_16T/crq/data/record_data/new_neck'
-save_data_path = '/home/robotics/crq/3D-Diffusion-Policy/3D-Diffusion-Policy/data/ultrasound_data_2cam_2.zarr'
-N = 5  # 采样间隔
+save_data_path = '/home/robotics/crq/3D-Diffusion-Policy/3D-Diffusion-Policy/data/ultrasound_data_2cam_3.zarr'
+N = 10  # 采样间隔
 T = 3
 # 获取目录下所有子文件夹
 subfolders = [os.path.join(expert_data_path, f) for f in os.listdir(expert_data_path) if os.path.isdir(os.path.join(expert_data_path, f))]
@@ -158,7 +166,7 @@ for subfolder in subfolders:
             current_orientation = data_dict['orientation']
 
             if prev_timestamp is not None:
-                if timestamp - prev_timestamp < 0.1:
+                if timestamp - prev_timestamp < 0.2:
                     continue
             
             cprint(f'Processing {npy_file}', 'green')
@@ -200,8 +208,9 @@ for subfolder in subfolders:
             timestamp = data_dict['timestamp']  # 记录时间戳
 
             # 将四元数转换为旋转矩阵，并提取前两列
-            rotation_matrix = quaternion_to_rotation_matrix(current_orientation)
-            rotation_6d = rotation_matrix[:, :2].flatten()  # 提取前两列并展平为 1D 数组
+            # rotation_matrix = quaternion_to_rotation_matrix(current_orientation)
+            # rotation_6d = rotation_matrix[:, :2].flatten()  # 提取前两列并展平为 1D 数组
+            rotation_6d = quaternion_to_rotation_6d(current_orientation)
 
             
 
@@ -213,7 +222,7 @@ for subfolder in subfolders:
 
             # action_state = np.concatenate([delta_position, current_position, current_orientation, force], axis=-1) # 7 + 6 = 13
             action_state = np.concatenate([current_position, rotation_6d, delta_position, delta_rpy, force], axis=-1) # 9+6+6=21
-            action_state2 = np.concatenate([delta_position, current_rpy, force], axis=-1) # 
+            action_state2 = np.concatenate([delta_position, current_rpy, force], axis=-1) # 12
             action_state3 = np.concatenate([current_position, rotation_6d, force], axis=-1) # 
             
             img_arrays.append(us_image)
