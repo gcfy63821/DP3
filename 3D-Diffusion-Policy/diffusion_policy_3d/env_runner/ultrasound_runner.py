@@ -248,7 +248,7 @@ class Ultrasound2CamRunner(BaseRunner):
                  device="cuda:0"):
         super().__init__(output_dir)
         
-        self.data_path = data_path  # 从数据集读取
+        self.data_path = cam2_data_path  # 从数据集读取
         self.batch_size = batch_size
         self.device = device
         self.n_obs_steps = n_obs_steps

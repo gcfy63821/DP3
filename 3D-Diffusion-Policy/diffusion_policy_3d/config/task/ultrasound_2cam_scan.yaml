@@ -14,22 +14,21 @@ shape_meta: &shape_meta
         shape: *image2_shape
         type: rgb
     state:
-      # shape: [18]
-      shape: [13]
+      shape: [18]
       type: low_dim
     force:
       shape: [6]
       type: low_dim
   action:
     # shape: [13] # state + force
-    shape: [16]
+    shape: [21]
 
-# env_runner: null
-env_runner:
-  _target_: diffusion_policy_3d.env_runner.ultrasound_runner.Ultrasound2CamRunner
-  eval_episodes: 20
-  n_obs_steps: ${n_obs_steps}
-  n_action_steps: ${n_action_steps}
+env_runner: null
+# env_runner:
+#   _target_: diffusion_policy_3d.env_runner.ultrasound_runner.Ultrasound2CamRunner
+#   eval_episodes: 20
+#   n_obs_steps: ${n_obs_steps}
+#   n_action_steps: ${n_action_steps}
 
 dataset:
   _target_: diffusion_policy_3d.dataset.ultrasound_dataset.Ultrasound2CamDataset

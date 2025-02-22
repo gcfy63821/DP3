@@ -624,7 +624,7 @@ class Ultrasound2CamEncoder(nn.Module):
 
         
 
-        block_channel = [64, 64]
+        block_channel = [64, 128]
         self.debug = debug
         pretrained = ultrasound_encoder_cfg.pretrained
         use_layernorm = ultrasound_encoder_cfg.use_layernorm
@@ -681,7 +681,7 @@ class Ultrasound2CamEncoder(nn.Module):
         # Final Fully Connected Layer
         # self.final_fc = nn.Linear(3 * self.resnet_output_dim, out_channel)
 
-        self.final_fc = nn.Linear(self.state_output_dim + self.force_output_dim + 2*self.resnet_output_dim, out_channel)
+        # self.final_fc = nn.Linear(self.state_output_dim + self.force_output_dim + 2*self.resnet_output_dim, out_channel)
     
     # @staticmethod
     # def create_mlp(input_dim: int, net_arch: List[int], activation_fn: Type[nn.Module]) -> List[nn.Module]:
@@ -715,8 +715,8 @@ class Ultrasound2CamEncoder(nn.Module):
         # Concatenate and Process
         combined_features = torch.cat([img_features1, img_features2, force_features, joint_features], dim=-1)  # Shape: [B, 3 * resnet_output_dim]
             
-        
-        output = self.final_fc(combined_features)  # Shape: [B, output_dim]
+        output = combined_features
+        # output = self.final_fc(combined_features)  # Shape: [B, output_dim]
 
 
         if self.debug:
@@ -733,5 +733,5 @@ class Ultrasound2CamEncoder(nn.Module):
         return output
     
     def output_shape(self):
-        return self.n_output_channels
+        return self.state_output_dim + self.force_output_dim + 2*self.resnet_output_dim
     

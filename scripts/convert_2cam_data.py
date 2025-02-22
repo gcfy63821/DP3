@@ -9,6 +9,14 @@ import tqdm
 from scipy.spatial.transform import Rotation as R
 import copy
 import cv2
+import pytorch3d.transforms as pt
+
+def quaternion_to_rotation_matrix(quaternion):
+    """
+    将四元数转换为旋转矩阵
+    """
+    r = R.from_quat(quaternion)
+    return r.as_matrix()
 
 def preproces_image1(image):
     img_size = 84
@@ -71,8 +79,8 @@ def extract_timestamp(file_path):
 # expert_data_path = '/home/robotics/crq/3D-Diffusion-Policy/3D-Diffusion-Policy/data/record_data/20250120'
 # save_data_path = '/home/robotics/crq/3D-Diffusion-Policy/3D-Diffusion-Policy/data/ultrasound_data.zarr'
 expert_data_path = '/media/robotics/ST_16T/crq/data/record_data/new_neck'
-save_data_path = '/home/robotics/crq/3D-Diffusion-Policy/3D-Diffusion-Policy/data/ultrasound_data_2cam.zarr'
-N = 10  # 采样间隔
+save_data_path = '/home/robotics/crq/3D-Diffusion-Policy/3D-Diffusion-Policy/data/ultrasound_data_2cam_2.zarr'
+N = 5  # 采样间隔
 T = 3
 # 获取目录下所有子文件夹
 subfolders = [os.path.join(expert_data_path, f) for f in os.listdir(expert_data_path) if os.path.isdir(os.path.join(expert_data_path, f))]
@@ -82,12 +90,22 @@ subfolders = sorted(subfolders)
 total_count = 0
 img_arrays = []
 img2_arrays = []
+
 state_arrays = []
+state2_arrays = []
+rotation_arrays = []
+
 force_arrays = []
 action_arrays = []
+action2_arrays = []
+action3_arrays = []
+
 timestamp_arrays = []
 episode_ends_arrays = []
-action_state_arrays = []
+
+
+
+
 
 if os.path.exists(save_data_path):
     cprint('Data already exists at {}'.format(save_data_path), 'red')
@@ -180,15 +198,32 @@ for subfolder in subfolders:
             # robot_state = np.concatenate([position_to_initial, rpy_to_initial, current_position, current_rpy, velocity, w], axis=-1)
             
             timestamp = data_dict['timestamp']  # 记录时间戳
+
+            # 将四元数转换为旋转矩阵，并提取前两列
+            rotation_matrix = quaternion_to_rotation_matrix(current_orientation)
+            rotation_6d = rotation_matrix[:, :2].flatten()  # 提取前两列并展平为 1D 数组
+
+            
+
             # action_state = np.concatenate([delta_position, delta_rpy, force], axis=-1)
-            robot_state = np.concatenate([current_position, current_orientation, velocity, position_to_initial], axis=-1) # 3+4+3+3=13
-            action_state = np.concatenate([delta_position, current_position, current_orientation, force], axis=-1) # 7 + 6 = 13
+            # robot_state = np.concatenate([current_position, current_orientation, velocity, position_to_initial], axis=-1) # 3+4+3+3=13
+            robot_state = np.concatenate([current_position, rotation_6d, velocity, w, position_to_initial], axis=-1) # 9+6+3=18
+            robot_state2 = np.concatenate([current_position, rotation_6d], axis=-1) # 9
+            robot_rotation = rotation_6d
 
-
+            # action_state = np.concatenate([delta_position, current_position, current_orientation, force], axis=-1) # 7 + 6 = 13
+            action_state = np.concatenate([current_position, rotation_6d, delta_position, delta_rpy, force], axis=-1) # 9+6+6=21
+            action_state2 = np.concatenate([delta_position, current_rpy, force], axis=-1) # 
+            action_state3 = np.concatenate([current_position, rotation_6d, force], axis=-1) # 
+            
             img_arrays.append(us_image)
             img2_arrays.append(realsense_image)
             force_arrays.append(force)
+
             state_arrays.append(robot_state)
+            state2_arrays.append(robot_state2)
+            rotation_arrays.append(robot_rotation)
+
             timestamp_arrays.append(timestamp)
             if current_count >= T:
                 action_arrays.append(action_state)
@@ -197,6 +232,8 @@ for subfolder in subfolders:
 
         while len(action_arrays) < len(force_arrays):
             action_arrays.append(action_state)
+            action2_arrays.append(action_state2)
+            action3_arrays.append(action_state3)
         
 
         
@@ -217,7 +254,13 @@ img2_arrays = np.stack(img2_arrays, axis=0)
 img2_arrays = np.transpose(img2_arrays, (0, 3, 1, 2))
 
 action_arrays = np.stack(action_arrays, axis=0)
+action2_arrays = np.stack(action2_arrays, axis=0)
+action3_arrays = np.stack(action3_arrays, axis=0)
+
 state_arrays = np.stack(state_arrays, axis=0)
+state2_arrays = np.stack(state2_arrays, axis=0)
+rotation_arrays = np.stack(rotation_arrays, axis=0)
+
 force_arrays = np.stack(force_arrays, axis=0)
 timestamp_arrays = np.array(timestamp_arrays)
 episode_ends_arrays = np.array(episode_ends_arrays)
@@ -238,7 +281,13 @@ zarr_data.create_dataset('img', data=img_arrays, chunks=img_chunk_size, dtype='u
 zarr_data.create_dataset('img2', data=img2_arrays, chunks=img2_chunk_size, dtype='uint8', overwrite=True, compressor=compressor)
 
 zarr_data.create_dataset('action', data=action_arrays, chunks=action_chunk_size, dtype='float32', overwrite=True, compressor=compressor)
+zarr_data.create_dataset('action2', data=action2_arrays, chunks=action_chunk_size, dtype='float32', overwrite=True, compressor=compressor)
+zarr_data.create_dataset('action3', data=action3_arrays, chunks=action_chunk_size, dtype='float32', overwrite=True, compressor=compressor)
+
 zarr_data.create_dataset('state', data=state_arrays, chunks=(100, state_arrays.shape[1]), dtype='float32', overwrite=True, compressor=compressor)
+zarr_data.create_dataset('state2', data=state_arrays, chunks=(100, state2_arrays.shape[1]), dtype='float32', overwrite=True, compressor=compressor)
+zarr_data.create_dataset('rotation', data=state_arrays, chunks=(100, rotation_arrays.shape[1]), dtype='float32', overwrite=True, compressor=compressor)
+
 zarr_data.create_dataset('force', data=force_arrays, chunks=(100, force_arrays.shape[1]), dtype='float32', overwrite=True, compressor=compressor)
 zarr_data.create_dataset('timestamp', data=timestamp_arrays, chunks=(100,), dtype='float64', overwrite=True, compressor=compressor)
 zarr_meta.create_dataset('episode_ends', data=episode_ends_arrays, chunks=(100,), dtype='int64', overwrite=True, compressor=compressor)

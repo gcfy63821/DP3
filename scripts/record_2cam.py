@@ -225,6 +225,7 @@ class DataCollector:
         try:
             self.tf_listener.waitForTransform("/panda_link0", "/panda_EE", rospy.Time(0), rospy.Duration(4.0))
             (trans, rot) = self.tf_listener.lookupTransform("/panda_link0", "/panda_EE", rospy.Time(0))
+            print('looked up tf:',np.array(trans), np.array(rot))
             return np.array(trans), np.array(rot)
         except (tf.LookupException, tf.ConnectivityException, tf.ExtrapolationException):
             print("TF Exception")

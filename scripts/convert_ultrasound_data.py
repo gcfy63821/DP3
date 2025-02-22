@@ -54,7 +54,7 @@ def extract_timestamp(file_path):
 # 输入路径（包含.npy文件）
 # expert_data_path = '/home/robotics/crq/3D-Diffusion-Policy/3D-Diffusion-Policy/data/record_data/20250120'
 # save_data_path = '/home/robotics/crq/3D-Diffusion-Policy/3D-Diffusion-Policy/data/ultrasound_data.zarr'
-expert_data_path = '/media/robotics/ST_16T/crq/data/record_data/20250220'
+expert_data_path = '/media/robotics/ST_16T/crq/data/record_data/new_neck'
 save_data_path = '/home/robotics/crq/3D-Diffusion-Policy/3D-Diffusion-Policy/data/ultrasound_data_neck.zarr'
 N = 5  # 采样间隔
 T = 3
