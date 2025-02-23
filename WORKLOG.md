@@ -257,13 +257,13 @@ open_realsense.py 可以打开realsense相机
  用欧拉角表示不够稳定，目前都换成了四元数
 
 zarr拷贝到服务器：
- scp -r -P 14822 /home/robotics/crq/3D-Diffusion-Policy/3D-Diffusion-Policy/data/ultrasound_data_2cam_2.zarr crq@166.111.72.148:/home/crq/crq/DP3/3D-Diffusion-Policy/data
+ scp -r -P 14822 /home/robotics/crq/3D-Diffusion-Policy/3D-Diffusion-Policy/data/ultrasound_data_2cam.zarr crq@166.111.72.148:/home/crq/crq/DP3/3D-Diffusion-Policy/data
 
 从服务器拷贝过来
  scp -P 14822 -r crq@166.111.72.148:/home/crq/crq/DP3/3D-Diffusion-Policy/data/outputs/ultrasound_2cam_scan-ultrasound_dp_2cam-0223-4_seed0 /home/robotics/crq/3D-Diffusion-Policy/3D-Diffusion-Policy/data/outputs
 
 
-  scp -P 14822 -r crq@166.111.72.148:/home/crq/crq/DP3/3D-Diffusion-Policy/data/ultrasound_data_2cam_3.zarr /home/robotics/crq/3D-Diffusion-Policy/3D-Diffusion-Policy/data
+  scp -P 14822 -r crq@166.111.72.148:/home/crq/crq/DP3/3D-Diffusion-Policy/data/ultrasound_data_2cam.zarr /home/robotics/crq/3D-Diffusion-Policy/3D-Diffusion-Policy/data
 
   **0222**
 

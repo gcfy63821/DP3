@@ -70,6 +70,20 @@ def remove_red_color(depth_colormap):
 
     return depth_colormap
 
+def apply_mask(depth_image, combined_image, min_depth, max_depth):
+    """
+    对深度图像应用掩码，只保留在指定阈值范围内的像素值，并应用到组合图像上
+    :param depth_image: 深度图像
+    :param combined_image: 组合图像
+    :param min_depth: 最小深度阈值
+    :param max_depth: 最大深度阈值
+    :return: 应用掩码后的组合图像
+    """
+    mask = (depth_image >= min_depth) & (depth_image <= max_depth)
+    mask = np.repeat(mask[:, :, np.newaxis], 3, axis=2)  # 扩展 mask 以匹配 combined_image 的形状
+    masked_image = np.where(mask, combined_image, 0)
+    return masked_image
+
 def extract_timestamp(file_path):
     # 提取文件名中的时间戳部分
     file_name = os.path.basename(file_path)
@@ -77,9 +91,9 @@ def extract_timestamp(file_path):
     return int(time_str)
 
 # 输入路径（包含.npy文件）
-# expert_data_path = '/home/robotics/crq/3D-Diffusion-Policy/3D-Diffusion-Policy/data/record_data/20250120'
+# expert_data_path = '/home/robotics/crq/3D-Diffusion-Policy/3D-Diffusion-Policy/data/record_data/20250223'
 # save_data_path = '/home/robotics/crq/3D-Diffusion-Policy/3D-Diffusion-Policy/data/ultrasound_data.zarr'
-expert_data_path = '/media/robotics/ST_16T/crq/data/record_data/neck23'
+expert_data_path = '/media/robotics/ST_16T/crq/data/record_data/20250223'
 # save_data_path = '/home/robotics/crq/3D-Diffusion-Policy/3D-Diffusion-Policy/data/ultrasound_data_2cam.zarr'
 N = 10  # 采样间隔
 T = 3
@@ -114,6 +128,9 @@ for subfolder in subfolders:
         us_image = data_dict['image']
         realsense_image = data_dict['image2']
         depth_image = data_dict['depth']
+        combined_image = data_dict['combined_image']
+
+        
 
         # 计算并输出深度图像中的最大和最小深度
         # masked_depth_image = apply_depth_mask(depth_image, min_depth, max_depth)
@@ -121,19 +138,17 @@ for subfolder in subfolders:
         min_depth_value = np.min(depth_image)  # 忽略掩码中的零值
         print(f"Max depth: {max_depth_value}, Min depth: {min_depth_value}")
 
-        min_depth = 100
+        min_depth = 1
         max_depth = max_depth_value * 0.1
         depth_image = apply_depth_mask(depth_image, min_depth, max_depth)
-        depth_image = remove_red_color(depth_image)
+
+        realsense_image = apply_mask(depth_image, realsense_image, min_depth, max_depth)
         
         
         # 将深度图像归一化到0-255范围
 
         depth_colormap = cv2.applyColorMap(cv2.convertScaleAbs(depth_image, alpha=0.03), cv2.COLORMAP_JET)
         # depth_colormap = apply_depth_mask(depth_colormap, min_depth, max_depth)
-        depth_colormap = remove_red_color(depth_colormap)
-
-
 
         # 显示图像
         cv2.imshow('US Image', us_image)

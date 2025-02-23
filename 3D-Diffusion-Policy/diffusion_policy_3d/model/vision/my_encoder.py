@@ -631,18 +631,30 @@ class Ultrasound2CamEncoder(nn.Module):
        
         
         # ResNet-18 for Image Encoding
-        resnet1 = resnet18(pretrained=pretrained)
+        resnet1 = resnet18(pretrained=False)
         resnet1.conv1 = nn.Conv2d(1, resnet1.conv1.out_channels, kernel_size=resnet1.conv1.kernel_size, 
                                   stride=resnet1.conv1.stride, padding=resnet1.conv1.padding, bias=resnet1.conv1.bias)
+        resnet1_fc_in_features = resnet1.fc.in_features  # 获取 fc 层的输入特征数
+        resnet1.fc = nn.Identity()
+        state_dict1 = torch.load('data/resnet_model.pth')
+        state_dict1 = {k.replace('resnet.', ''): v for k, v in state_dict1.items() if not k.startswith('fc.')}  # 移除全连接层的键
+        state_dict1 = {k: v for k, v in state_dict1.items() if not k.startswith('fc.')}  # 移除全连接层的键
+        resnet1.load_state_dict(state_dict1)
         self.cnn1 = nn.Sequential(*list(resnet1.children())[:-1])  # Remove the fully connected layer
-        self.cnn_fc1 = nn.Linear(resnet1.fc.in_features, self.resnet_output_dim)
+        self.cnn_fc1 = nn.Linear(resnet1_fc_in_features, self.resnet_output_dim)
 
         # Resnet-34 for wrist camera
-        resnet2 = resnet34(pretrained=pretrained)
+        resnet2 = resnet34(pretrained=False)
         resnet2.conv1 = nn.Conv2d(4, resnet2.conv1.out_channels, kernel_size=resnet2.conv1.kernel_size, 
                                   stride=resnet2.conv1.stride, padding=resnet2.conv1.padding, bias=resnet2.conv1.bias)
+        resnet2_fc_in_features = resnet2.fc.in_features  # 获取 fc 层的输入特征数
+        resnet2.fc = nn.Identity()
+        state_dict2 = torch.load('data/resnet2_model.pth')
+        state_dict2 = {k.replace('resnet.', ''): v for k, v in state_dict2.items() if not k.startswith('fc.')}  # 移除全连接层的键
+        state_dict2 = {k: v for k, v in state_dict2.items() if not k.startswith('fc.')}  # 移除全连接层的键
+        resnet2.load_state_dict(state_dict2)
         self.cnn2 = nn.Sequential(*list(resnet2.children())[:-1])  # Remove the fully connected layer
-        self.cnn_fc2 = nn.Linear(resnet2.fc.in_features, self.resnet_output_dim)
+        self.cnn_fc2 = nn.Linear(resnet2_fc_in_features, self.resnet_output_dim)
 
 
         

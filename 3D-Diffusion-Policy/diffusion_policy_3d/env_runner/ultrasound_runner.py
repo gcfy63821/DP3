@@ -378,6 +378,7 @@ class Ultrasound2CamRunner(BaseRunner):
                     # desired_position = curr_state[6:9]
                     # desired_rpy = curr_state[9:12]
                     desired_position = curr_state[:3]
+                    desired_delta_position = curr_state[:3]
                     # desired_orientation = curr_state[3:7]
                     desired_rotation6d = curr_state[3:9]
                 

@@ -66,7 +66,7 @@ policy:
     resnet_output_dim: 64  # ResNet feature output dimension
     state_output_dim: 64
     force_output_dim: 64
-    pretrained: False  # Whether to use pretrained weights for ResNet
+    pretrained: True  # Whether to use pretrained weights for ResNet
     use_layernorm: False
     debug: False
 

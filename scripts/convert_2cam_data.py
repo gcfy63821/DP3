@@ -83,13 +83,39 @@ def extract_timestamp(file_path):
     time_str = file_name.split('_')[1]
     return int(time_str)
 
+def apply_depth_mask(depth_image, min_depth, max_depth):
+    """
+    对深度图像应用掩码，只保留在指定阈值范围内的像素值
+    :param depth_image: 深度图像
+    :param min_depth: 最小深度阈值
+    :param max_depth: 最大深度阈值
+    :return: 应用掩码后的深度图像
+    """
+    mask = (depth_image >= min_depth) & (depth_image <= max_depth)
+    masked_depth_image = np.where(mask, depth_image, 0)
+    return masked_depth_image
+
+def apply_mask(depth_image, combined_image, min_depth, max_depth):
+    """
+    对深度图像应用掩码，只保留在指定阈值范围内的像素值，并应用到组合图像上
+    :param depth_image: 深度图像
+    :param combined_image: 组合图像
+    :param min_depth: 最小深度阈值
+    :param max_depth: 最大深度阈值
+    :return: 应用掩码后的组合图像
+    """
+    mask = (depth_image >= min_depth) & (depth_image <= max_depth)
+    mask = np.repeat(mask[:, :, np.newaxis], 4, axis=2)  # 扩展 mask 以匹配 combined_image 的形状
+    masked_image = np.where(mask, combined_image, 0)
+    return masked_image
+
 # 输入路径（包含.npy文件）
 # expert_data_path = '/home/robotics/crq/3D-Diffusion-Policy/3D-Diffusion-Policy/data/record_data/20250120'
 # save_data_path = '/home/robotics/crq/3D-Diffusion-Policy/3D-Diffusion-Policy/data/ultrasound_data.zarr'
-expert_data_path = '/media/robotics/ST_16T/crq/data/record_data/neck23'
-save_data_path = '/home/robotics/crq/3D-Diffusion-Policy/3D-Diffusion-Policy/data/ultrasound_data_2cam_2.zarr'
+expert_data_path = '/media/robotics/ST_16T/crq/data/record_data/neck24'
+save_data_path = '/home/robotics/crq/3D-Diffusion-Policy/3D-Diffusion-Policy/data/ultrasound_data_2cam.zarr'
 N = 5  # 采样间隔
-T = 5
+T = 3
 # 获取目录下所有子文件夹
 subfolders = [os.path.join(expert_data_path, f) for f in os.listdir(expert_data_path) if os.path.isdir(os.path.join(expert_data_path, f))]
 subfolders = sorted(subfolders)
@@ -197,7 +223,12 @@ for subfolder in subfolders:
 
             us_image = data_dict['image']
             us_image = preproces_image1(us_image)
+            depth_image = data_dict['depth']
             realsense_image = data_dict['combined_image']
+            max_depth_value = np.max(depth_image)
+            min_depth = 100
+            max_depth = max_depth_value * 0.1
+            realsense_image = apply_mask(depth_image, realsense_image, min_depth, max_depth)
             realsense_image = preproces_image2(realsense_image)
             # force = np.concatenate([data_dict['ft_compensated'], data_dict['netft']], axis=-1)
             force = data_dict['ft_compensated']
@@ -216,13 +247,13 @@ for subfolder in subfolders:
 
             # action_state = np.concatenate([delta_position, delta_rpy, force], axis=-1)
             # robot_state = np.concatenate([current_position, current_orientation, velocity, position_to_initial], axis=-1) # 3+4+3+3=13
-            robot_state = np.concatenate([current_position, rotation_6d, velocity, w, position_to_initial], axis=-1) # 9+6+3=18
-            robot_state2 = np.concatenate([current_position, rotation_6d], axis=-1) # 9
+            robot_state = np.concatenate([current_position, rotation_6d, velocity, position_to_initial], axis=-1) # 9+6 = 15
+            robot_state2 = np.concatenate([current_position, rotation_6d, position_to_initial], axis=-1) # 9+ 3
             robot_rotation = rotation_6d
 
             # action_state = np.concatenate([delta_position, current_position, current_orientation, force], axis=-1) # 7 + 6 = 13
-            action_state = np.concatenate([current_position, rotation_6d, delta_position, delta_rpy, force], axis=-1) # 9+6+6=21
-            action_state2 = np.concatenate([delta_position, current_rpy, force], axis=-1) # 12
+            action_state = np.concatenate([current_position, rotation_6d, delta_position, force], axis=-1) # 9+6+3=18
+            action_state2 = np.concatenate([delta_position, rotation_6d, force], axis=-1) # 9+6=15
             action_state3 = np.concatenate([current_position, rotation_6d, force], axis=-1) # 
             
             img_arrays.append(us_image)
