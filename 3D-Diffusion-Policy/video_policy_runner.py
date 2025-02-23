@@ -76,7 +76,7 @@ class PolicyROSRunner:
     def __init__(self, cfg: OmegaConf, output_dir=None):
         self.cfg = copy.deepcopy(cfg)
         self.device = torch.device(self.cfg.training.device)
-        self.output_dir = 'data/outputs/ultrasound_2cam_scan-ultrasound_dp_2cam-0222-10_seed0'
+        self.output_dir = 'data/outputs/ultrasound_2cam_scan-ultrasound_dp_2cam-0223-1_seed0'
 
         # 初始化 ROS 节点
         rospy.init_node('ultrasound_policy_runner', anonymous=True)
@@ -239,7 +239,7 @@ class PolicyROSRunner:
         image = image.cpu().numpy()
         return image
 
-    def obs2dp_obs(self):
+    def obs2dp_obs(self, data_dict):
         timestamp = time.time()
         if self.curr_force is None:
             return
@@ -251,7 +251,11 @@ class PolicyROSRunner:
 
         # obs_history = {"img": None,"img2":None}
 
-        position, orientation = self.get_panda_EE_transform()
+        # position, orientation = self.get_panda_EE_transform()
+        position = data_dict['position']
+        orientation = data_dict['orientation']
+        curr_force = data_dict['ft_compensated']
+
         if position is None or orientation is None:
             return
         euler = R.from_quat(orientation).as_euler('xyz', degrees=False)
@@ -287,7 +291,8 @@ class PolicyROSRunner:
         # state = np.concatenate([position_to_initial, rpy_to_initial, position, euler, velocity, w], axis=-1)
         # state = np.concatenate([position, euler, velocity, w], axis=-1)
         state = np.concatenate([position, rotation_6d, velocity, w, position_to_initial], axis=-1)
-        force = self.curr_force.copy()
+        # force = self.curr_force.copy()
+        force = curr_force
 
         # obs_history["state"] = state
         # obs_history["force"] = force
@@ -315,7 +320,7 @@ class PolicyROSRunner:
 
         obs_queue = collections.deque(maxlen=self.n_obs_steps)
 
-        expert_data_path = '/media/robotics/ST_16T/crq/data/record_data/new_neck'
+        expert_data_path = '/media/robotics/ST_16T/crq/data/record_data/neck23'
         subfolders = [os.path.join(expert_data_path, f) for f in os.listdir(expert_data_path) if os.path.isdir(os.path.join(expert_data_path, f))]
         subfolders = sorted(subfolders)
 
@@ -347,7 +352,9 @@ class PolicyROSRunner:
                 cv2.imshow('RealSense Image', color_image)
                 self.rate.sleep()
 
-                state, force = self.obs2dp_obs()
+                state, force = self.obs2dp_obs(data_dict)
+
+
 
                 curr_img = self.preproces_image1(frame)
 
@@ -409,11 +416,11 @@ class PolicyROSRunner:
                         # desired_position += nactions[9:12]
                         # desired_position = nactions[:3]
                         
-                        # desired_position = this_action[:3]
+                        desired_position = this_action[:3]
                         delta_position = this_action[9:12]
                         delta_rpy = this_action[12:15]
 
-                        desired_position += delta_position
+                        # desired_position += delta_position
                         desired_rotation6d = this_action[3:9]
                         desired_orientation = rotation6d_to_quaternion(desired_rotation6d)
 

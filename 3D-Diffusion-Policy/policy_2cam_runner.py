@@ -38,7 +38,7 @@ from scipy.spatial.transform import Rotation as R
 import pyrealsense2 as rs
 import pytorch3d.transforms as pt
 import collections
-
+import pdb
 
 OmegaConf.register_new_resolver("eval", eval, replace=True)
 
@@ -70,7 +70,7 @@ class PolicyROSRunner:
     def __init__(self, cfg: OmegaConf, output_dir=None):
         self.cfg = copy.deepcopy(cfg)
         self.device = torch.device(self.cfg.training.device)
-        self.output_dir = 'data/outputs/ultrasound_2cam_scan-ultrasound_dp_2cam-0222-9_seed0'
+        self.output_dir = 'data/outputs/ultrasound_2cam_scan-ultrasound_dp_2cam-0223-1_seed0'
 
         # 初始化 ROS 节点
         rospy.init_node('ultrasound_policy_runner', anonymous=True)
@@ -321,9 +321,7 @@ class PolicyROSRunner:
                 # 显示视频流
                 cv2.imshow("Video Stream", frame)
                 cv2.imshow('Color Image', color_image)
-                if current_time is None:
-                    # 避免开始的时候有绿色的帧
-                    time.sleep(1)
+                
                 current_time = rospy.get_time()
                 # curr_obs = self.obs2dp_obs()
 
@@ -397,6 +395,10 @@ class PolicyROSRunner:
 
 
                 # prepped_data = {k: torch.tensor(np.array([v]), device="cuda") for k, v in obs_history.items()}
+                if current_time is None:
+                    # 避免开始的时候有绿色的帧
+                    print('waiting')
+                    time.sleep(2.5)
 
                 with torch.no_grad():
                     print('start_inference')
@@ -417,12 +419,12 @@ class PolicyROSRunner:
                         # desired_position += nactions[9:12]
                         # desired_position = nactions[:3]
                         
-                        desired_position = this_action[:3]
+                        # desired_position = this_action[:3]
                         delta_position = this_action[9:12]
                         delta_rpy = this_action[12:15]
 
-                        # desired_position += delta_position
-                        desired_rotation6d = this_action[3:9]
+                        desired_position += delta_position
+                        # desired_rotation6d = this_action[3:9]
                         desired_orientation = rotation6d_to_quaternion(desired_rotation6d)
 
                         output_position = desired_position
@@ -431,23 +433,53 @@ class PolicyROSRunner:
                         
                         self.publish_tf(output_position, output_orientation, frame_id="panda_link0", child_id=f"action_frame_{i}")
 
-                        self.publish_pose_and_wrench(output_wrench, output_position, output_orientation)
-                        # curr_state = state.cpu().numpy()
+                        # self.publish_pose_and_wrench(output_wrench, output_position, output_orientation)
+                        curr_state = state.cpu().numpy()
                         # print(1)
                         print('force:',output_wrench)
 
-                        # delta_position_length = np.linalg.norm(output_position - curr_state[:3])
-                        # force_magnitude = np.linalg.norm(output_wrench)
-                        # print('delta_position_lenth:',delta_position_length, 'force:', force_magnitude)
+                        delta_position_length = np.linalg.norm(output_position - curr_state[:3])
+                        force_magnitude = np.linalg.norm(output_wrench)
+                        print('delta_position_lenth:',delta_position_length, 'force:', force_magnitude)
+
+                        # front_or_back = desired_position-curr_state[:3]
+                        # z_axis = R.from_quat(desired_orientation).as_matrix()[:,2]
+                        # if not np.isnan(front_or_back[2]/z_axis[2]):
+                        #     if not abs((front_or_back[2]/z_axis[2]))<0.01:
+                        #         desired_position-=front_or_back[2]/z_axis[2]*z_axis
+                        # else:
+                        #     if not abs((front_or_back[1]/z_axis[1]))<0.01:
+                        #         desired_position-=front_or_back[1]/z_axis[1]*z_axis
+
+                        # self.publish_pose_and_wrench(output_wrench, output_position, output_orientation)
                         
                         # if delta_position_length < 0.04:
                         #     self.publish_pose_and_wrench(output_wrench, output_position, output_orientation)
                         #     self.publish_tf(output_position, output_orientation, frame_id="panda_link0", child_id=f"action_frame")
-
+                        #     (trans, rot) = self.tf_listener.lookupTransform("/panda_EE", "/action_frame", rospy.Time(0))
+                        #     trans = np.array(trans)
+                        #     rot = np.array(rot)
+                        #     # print(trans)
+                        #     trans[2] = 0
+                        #     self.publish_tf(trans, rot, frame_id="panda_EE", child_id=f"modified_action_frame")
+                        
                         # else: # back to stable
                         #     desired_position = curr_state[:3]
                         #     desired_rotation6d = curr_state[3:9]
                         #     print('going back')
+                        self.publish_tf(output_position, output_orientation, frame_id="panda_link0", child_id=f"action_frame")
+                        (trans, rot) = self.tf_listener.lookupTransform("/panda_EE", "/action_frame", rospy.Time(0))
+                        trans = np.array(trans)
+                        rot = np.array(rot)
+                        # print(trans)
+                        trans[2] = 0
+                        self.publish_tf(trans, rot, frame_id="panda_EE", child_id=f"modified_action_frame")
+
+                        (trans, rot) = self.tf_listener.lookupTransform("/panda_link0", "/modified_action_frame", rospy.Time(0))
+                        trans = np.array(trans)
+                        rot = np.array(rot)
+                        
+                        self.publish_pose_and_wrench(output_wrench, trans, rot)
 
 
                         self.rate.sleep()

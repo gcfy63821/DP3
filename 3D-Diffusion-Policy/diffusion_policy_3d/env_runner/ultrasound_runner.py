@@ -404,6 +404,8 @@ class Ultrasound2CamRunner(BaseRunner):
                         # desired_orientation = desired_orientation / np.linalg.norm(desired_orientation)
                         # desired_rotation6d = nactions[3:9]
                         desired_rotation6d = this_action[3:9]
+                        delta_position = this_action[9:12]
+                        desired_delta_position += delta_position
                         
                         desired_orientation = rotation6d_to_quaternion(desired_rotation6d)
 

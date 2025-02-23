@@ -93,31 +93,7 @@ roslaunch franka_us_controllers my_ipd_force_controller_dp.launch
 调试的时候会注释launch文件里marker部分。
 
 
-### DP部分用法：
 
-1. 采数据：
-
-    python scripts/record_diffusion_data.py
-
-    开始后单击q或点鼠标可以结束
-
-2. 处理数据：先改下面这个代码里面的输入输出路径，输入为硬盘里采集好的数据（会自动创建日期文件夹）
-
-    python scripts/convert_ultrasound_data.py 
-
-    让 3D-Diffusion-Policy/diffusion_policy_3d/config/task/ultrasound_scan.yaml
-    第32行的压缩包名字与输出匹配即可
-
-3. train policy：
-
-    bash scripts/train_policy.sh ultrasound_dp ultrasound_scan 0206-5 0 0 
-    
-    （好像那个日期是实验编号需要每次改一改）
-    可以在wandb网页查看训练情况，本地每100epoch存一个policy
-
-4. 运行policy：
-
-    bash scripts/run.sh ultrasound_dp ultrasound_scan 0206-5 0 0
 
 
 
@@ -281,10 +257,60 @@ open_realsense.py 可以打开realsense相机
  用欧拉角表示不够稳定，目前都换成了四元数
 
 zarr拷贝到服务器：
- scp -r -P 14822 /home/robotics/crq/3D-Diffusion-Policy/3D-Diffusion-Policy/data/ultrasound_data_2cam_3.zarr crq@166.111.72.148:/home/crq/crq/DP3/3D-Diffusion-Policy/data
+ scp -r -P 14822 /home/robotics/crq/3D-Diffusion-Policy/3D-Diffusion-Policy/data/ultrasound_data_2cam_2.zarr crq@166.111.72.148:/home/crq/crq/DP3/3D-Diffusion-Policy/data
 
 从服务器拷贝过来
- scp -P 14822 -r crq@166.111.72.148:/home/crq/crq/DP3/3D-Diffusion-Policy/data/outputs/ultrasound_2cam_scan-ultrasound_dp_2cam-0222-10_seed0 /home/robotics/crq/3D-Diffusion-Policy/3D-Diffusion-Policy/data/outputs
+ scp -P 14822 -r crq@166.111.72.148:/home/crq/crq/DP3/3D-Diffusion-Policy/data/outputs/ultrasound_2cam_scan-ultrasound_dp_2cam-0223-4_seed0 /home/robotics/crq/3D-Diffusion-Policy/3D-Diffusion-Policy/data/outputs
 
 
   scp -P 14822 -r crq@166.111.72.148:/home/crq/crq/DP3/3D-Diffusion-Policy/data/ultrasound_data_2cam_3.zarr /home/robotics/crq/3D-Diffusion-Policy/3D-Diffusion-Policy/data
+
+  **0222**
+
+  11： 数据是3
+
+  晚上挂了12，obs2，action5
+
+
+### DP部分用法：
+使用两个相机图像输入的代码
+
+1. 采数据：
+
+    python scripts/record_2cam.py
+
+    开始后单击q或点鼠标可以结束
+
+2. 处理数据：先改下面这个代码里面的输入输出路径，输入为硬盘里采集好的数据（会自动创建日期文件夹）
+
+    python scripts/convert_2cam_data.py 
+
+    让 3D-Diffusion-Policy/diffusion_policy_3d/config/task/ultrasound_2cam_scan.yaml
+    第32行的压缩包名字与输出匹配即可
+
+3. train policy：
+
+    bash scripts/train_policy.sh ultrasound_dp_2cam ultrasound_2cam_scan 0223-1 0 0 
+    
+    可以在wandb网页查看训练情况，本地每100epoch存一个policy
+
+4. 运行policy：
+
+    bash scripts/run_2cam.sh ultrasound_dp_2cam ultrasound_2cam_scan 0223-1 0 0
+    
+
+    会调用policy_2cam_runner.py
+
+5. 使用视频输入：
+    run_video.sh
+
+    调用video_policy_runner.py
+
+6. evaluate:
+
+    bash scripts/eval_policy.sh  ultrasound_dp_2cam ultrasound_2cam_scan 0223-1 0 0
+
+    调用env_runner/ultrasound_runner，里面的Ultrasound2CamRunner
+
+
+0223-1 0223-4还行

@@ -370,7 +370,7 @@ class Ultrasound2CamDataset(BaseDataset):
             ):
         super().__init__()
         self.task_name = task_name
-        zarr_path = 'data/ultrasound_data_2cam_2.zarr'
+        zarr_path = 'data/ultrasound_data_2cam.zarr'
         # zarr_path = 'data/ultrasound_data_arm.zarr'
         self.replay_buffer = ReplayBuffer.copy_from_path(
             zarr_path, keys=['state', 'action', 'force', 'img', 'img2'])
